@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 // VersionResponse represents the XML response from the /bigbluebutton/api/ endpoint
@@ -124,6 +126,9 @@ func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 }
 
 func main() {
+	// Optionally load .env file (silently ignore if not found)
+	_ = godotenv.Load()
+
 	// Read environment variables
 	bbbURL := os.Getenv("BBB_SERVER_URL")
 	bbbSecret := os.Getenv("BBB_SERVER_SECRET")
