@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 )
 
 // VersionResponse represents the XML response from the /bigbluebutton/api/ endpoint
@@ -54,7 +53,10 @@ func calculateChecksum(callName string, queryString string, secret string) strin
 // getBBBVersion fetches the BigBlueButton server version
 func getBBBVersion(baseURL string) (*VersionResponse, error) {
 	// Build the request URL
-	apiURL := fmt.Sprintf("%s/api/", strings.TrimSuffix(baseURL, "/"))
+	apiURL, err := url.JoinPath(baseURL, "api")
+	if err != nil {
+		return nil, fmt.Errorf("failed to build API URL: %w", err)
+	}
 
 	resp, err := http.Get(apiURL)
 	if err != nil {
@@ -90,15 +92,19 @@ func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 	params.Add("attendeePW", attendeePW)
 	params.Add("moderatorPW", moderatorPW)
 
-	queryString := params.Encode()
-
 	// Calculate checksum
-	checksum := calculateChecksum("create", queryString, secret)
+	checksum := calculateChecksum("create", params.Encode(), secret)
+	params.Add("checksum", checksum)
 
 	// Build the request URL
-	apiURL := fmt.Sprintf("%s/api/create?%s&checksum=%s", strings.TrimSuffix(baseURL, "/"), queryString, checksum)
+	serverUrl, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build API URL: %w", err)
+	}
+	apiURL := serverUrl.JoinPath("api", "create")
+	apiURL.RawQuery = params.Encode()
 
-	resp, err := http.Get(apiURL)
+	resp, err := http.Get(apiURL.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
