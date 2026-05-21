@@ -93,6 +93,7 @@ func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 	params.Add("meetingID", meetingID)
 	params.Add("attendeePW", attendeePW)
 	params.Add("moderatorPW", moderatorPW)
+	params.Add("muteOnStart", "true")
 
 	// Calculate checksum
 	checksum := calculateChecksum("create", params.Encode(), secret)
