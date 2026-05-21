@@ -82,18 +82,19 @@ func getBBBVersion(baseURL string) (*VersionResponse, error) {
 // createMeeting creates a new meeting room on the BigBlueButton server
 func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 	// Demo parameters for creating a meeting
-	meetingName := "Demo Meeting"
 	meetingID := "demo-meeting-" + fmt.Sprintf("%d", os.Getpid()) + "-" + fmt.Sprintf("%d", len("Demo Meeting"))
-	attendeePW := "ap"
-	moderatorPW := "mp"
 
 	// Build query string (URL encoded)
 	params := url.Values{}
-	params.Add("name", meetingName)
 	params.Add("meetingID", meetingID)
-	params.Add("attendeePW", attendeePW)
-	params.Add("moderatorPW", moderatorPW)
+	params.Add("name", "Opencast Meeting")
 	params.Add("muteOnStart", "true")
+	params.Add("record", "true")
+	params.Add("autoStartRecording", "false")
+	params.Add("allowStartStopRecording", "true")
+	params.Add("loginURL", "https://meet.opencast.video")
+	params.Add("logoutURL", "https://meet.opencast.video")
+	params.Add("preUploadedPresentation", "https://meet.opencast.video/intentionally-invalid.pdf")
 
 	// Calculate checksum
 	checksum := calculateChecksum("create", params.Encode(), secret)
