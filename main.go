@@ -125,6 +125,39 @@ func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 	return &createResp, nil
 }
 
+// generateJoinURL generates a BigBlueButton join URL for a participant
+func generateJoinURL(baseURL, meetingID, fullName, role, secret string) (string, error) {
+	// Build query string (URL encoded)
+	params := url.Values{}
+	params.Add("fullName", fullName)
+	params.Add("meetingID", meetingID)
+	params.Add("role", role)
+
+	// Calculate checksum
+	checksum := calculateChecksum("join", params.Encode(), secret)
+	params.Add("checksum", checksum)
+
+	// Build the request URL
+	serverUrl, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to build API URL: %w", err)
+	}
+	joinURL := serverUrl.JoinPath("api", "join")
+	joinURL.RawQuery = params.Encode()
+
+	return joinURL.String(), nil
+}
+
+// generateModeratorJoinURL generates a join URL for a moderator
+func generateModeratorJoinURL(baseURL, meetingID, secret string) (string, error) {
+	return generateJoinURL(baseURL, meetingID, "Moderator", "MODERATOR", secret)
+}
+
+// generateAttendeeJoinURL generates a join URL for an attendee
+func generateAttendeeJoinURL(baseURL, meetingID, secret string) (string, error) {
+	return generateJoinURL(baseURL, meetingID, "Attendee", "VIEWER", secret)
+}
+
 func main() {
 	// Optionally load .env file (silently ignore if not found)
 	_ = godotenv.Load()
@@ -172,4 +205,25 @@ func main() {
 	fmt.Printf("Moderator Password: %s\n", createResp.ModeratorPW)
 	fmt.Printf("Voice Bridge: %s\n", createResp.VoiceBridge)
 	fmt.Printf("Dial Number: %s\n", createResp.DialNumber)
+	fmt.Println()
+
+	// Generate and print join URLs
+	fmt.Println("=== Join URLs ===")
+	fmt.Println("Join URLs are generated using the role parameter (MODERATOR/VIEWER)")
+
+	// Generate moderator join URL
+	moderatorURL, err := generateModeratorJoinURL(bbbURL, createResp.MeetingID, bbbSecret)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating moderator join URL: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Moderator Join URL:\n%s\n\n", moderatorURL)
+
+	// Generate attendee join URL
+	attendeeURL, err := generateAttendeeJoinURL(bbbURL, createResp.MeetingID, bbbSecret)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error generating attendee join URL: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Attendee Join URL:\n%s\n", attendeeURL)
 }
