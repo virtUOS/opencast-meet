@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 //go:embed static/index.html static/img
 var staticFiles embed.FS
 
+// ///
 // VersionResponse represents the XML response from the /bigbluebutton/api/ endpoint
 type VersionResponse struct {
 	XMLName    xml.Name `xml:"response"`
@@ -137,6 +139,13 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+var reDate = regexp.MustCompile(`{{\s*DATE\s*}}`)
+
+// expandPlaceholders replaces {{DATE}} (spaces optional) with today's date (YYYY-MM-DD).
+func expandPlaceholders(s string) string {
+	return reDate.ReplaceAllString(s, time.Now().Format("2006-01-02"))
+}
+
 // getBBBVersion fetches the BigBlueButton server version.
 func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error) {
 	apiURL, err := url.JoinPath(baseURL, "api")
@@ -169,7 +178,7 @@ func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error
 func createMeeting(cfg Config, client *http.Client) (*CreateResponse, error) {
 	params := url.Values{}
 	params.Add("meetingID", cfg.MeetingID)
-	name := cfg.MeetingName
+	name := expandPlaceholders(cfg.MeetingName)
 	params.Add("name", name)
 	if cfg.MuteOnStart != "" {
 		params.Add("muteOnStart", cfg.MuteOnStart)
