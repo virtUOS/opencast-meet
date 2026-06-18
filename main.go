@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/xml"
+	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -297,7 +298,17 @@ func getEnvDefault(key, fallback string) string {
 }
 
 func main() {
-	_ = godotenv.Load()
+	envPath := flag.String("env-path", "", "path to the environment file to load (default: .env in current directory)")
+	flag.Parse()
+
+	if *envPath != "" {
+		if err := godotenv.Load(*envPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading env file %s: %v\n", *envPath, err)
+			os.Exit(1)
+		}
+	} else {
+		_ = godotenv.Load()
+	}
 
 	cfg := loadConfig()
 
