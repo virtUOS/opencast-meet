@@ -1,0 +1,15 @@
+[Unit]
+Description=Opencast Meet - BigBlueButton web portal with Opencast integration
+Documentation=https://github.com/virtuos/opencast-meet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opencast-meet
+Group=opencast-meet
+ExecStart=/usr/bin/opencast-meet --env-path /etc/opencast-meet.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

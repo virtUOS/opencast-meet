@@ -29,6 +29,19 @@ jobs:
           GOARCH: arm64
         run: go build -o "opencast-meet-${{ github.ref_name }}.linux-arm64"
 
+      - name: Build x86_64 RPM
+        env:
+          BINARY: "opencast-meet-${{ github.ref_name }}.linux-x86_64"
+          ARCH: x86_64
+        run: >
+          docker run
+          -v .:/rpmbuild
+          quay.io/centos/centos:stream10
+          /rpmbuild/.rpm/build-rpm.sh
+          "${BINARY}"
+          "${{ github.ref_name }}"
+          "${ARCH}"
+
       - run: file opencast-meet*
 
       - name: Create release
