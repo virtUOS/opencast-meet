@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -65,8 +66,9 @@ type Config struct {
 }
 
 type server struct {
-	config Config
-	tmpl   *template.Template
+	config     Config
+	tmpl       *template.Template
+	httpClient *http.Client
 }
 
 // calculateChecksum generates the SHA-256 checksum for BigBlueButton API calls.
@@ -78,13 +80,13 @@ func calculateChecksum(callName, queryString, secret string) string {
 }
 
 // getBBBVersion fetches the BigBlueButton server version.
-func getBBBVersion(baseURL string) (*VersionResponse, error) {
+func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error) {
 	apiURL, err := url.JoinPath(baseURL, "api")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build API URL: %w", err)
 	}
 
-	resp, err := http.Get(apiURL)
+	resp, err := client.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -106,7 +108,7 @@ func getBBBVersion(baseURL string) (*VersionResponse, error) {
 // createMeeting ensures the configured meeting room exists on the BBB server.
 // BBB is idempotent on meetingID: returns the existing meeting if already running,
 // or creates a fresh one if it has ended.
-func createMeeting(cfg Config) (*CreateResponse, error) {
+func createMeeting(cfg Config, client *http.Client) (*CreateResponse, error) {
 	params := url.Values{}
 	params.Add("meetingID", cfg.MeetingID)
 	params.Add("name", cfg.MeetingName)
@@ -161,7 +163,7 @@ func createMeeting(cfg Config) (*CreateResponse, error) {
 	apiURL := serverURL.JoinPath("api", "create")
 	apiURL.RawQuery = params.Encode()
 
-	resp, err := http.Get(apiURL.String())
+	resp, err := client.Get(apiURL.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -240,7 +242,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	createResp, err := createMeeting(s.config)
+	createResp, err := createMeeting(s.config, s.httpClient)
 	if err != nil {
 		log.Printf("error creating meeting: %v", err)
 		renderError("Could not connect to the meeting server. Please try again later.")
@@ -325,8 +327,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+
 	// Startup connection check — warn but don't abort if BBB is unreachable.
-	versionResp, err := getBBBVersion(cfg.BBBURL)
+	versionResp, err := getBBBVersion(cfg.BBBURL, httpClient)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not reach BBB server: %v\n", err)
 	} else {
@@ -344,7 +348,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &server{config: cfg, tmpl: tmpl}
+	srv := &server{config: cfg, tmpl: tmpl, httpClient: httpClient}
 
 	http.HandleFunc("/", srv.handleIndex)
 	http.HandleFunc("/join", srv.handleJoin)
