@@ -2,6 +2,8 @@
 
 A lightweight BigBlueButton web portal with Opencast integration.
 
+![Screenshot of meet.opencast.video](.github/screenshot.png)
+
 ## Overview
 
 Opencast Meet serves a simple login form where visitors enter their name and a
