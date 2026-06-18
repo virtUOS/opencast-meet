@@ -42,6 +42,8 @@ started.
 | `BBB_WELCOME_MESSAGE` | | Message shown inside the meeting |
 | `BBB_PRE_UPLOADED_PRESENTATION` | | URL of a pre-loaded presentation |
 | `APP_LISTEN_ADDR` | `127.0.0.1:8080` | HTTP listen address |
+| `METRICS_USERNAME` | | Username for `/metrics` Basic Auth (must be paired with `METRICS_PASSWORD`) |
+| `METRICS_PASSWORD` | | Password for `/metrics` Basic Auth (must be paired with `METRICS_USERNAME`) |
 
 ### Opencast Integration
 

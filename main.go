@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/xml"
@@ -63,6 +64,9 @@ type Config struct {
 	UserPassword      string
 	ModeratorPassword string
 	ListenAddr        string
+
+	MetricsUsername string
+	MetricsPassword string
 
 	// Opencast metadata (passed as meta_* on BBB create)
 	OCSeriesID      string
@@ -400,6 +404,20 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 }
 
 
+func basicAuthHandler(username, password string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Basic realm="metrics"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func loadConfig() Config {
 	return Config{
 		BBBURL:    os.Getenv("BBB_SERVER_URL"),
@@ -427,6 +445,9 @@ func loadConfig() Config {
 		OCACLWriteRoles: os.Getenv("OC_ACL_WRITE_ROLES"),
 
 		EnableRealIP: strings.EqualFold(os.Getenv("ENABLE_REAL_IP"), "true"),
+
+		MetricsUsername: os.Getenv("METRICS_USERNAME"),
+		MetricsPassword: os.Getenv("METRICS_PASSWORD"),
 	}
 }
 
@@ -462,6 +483,10 @@ func main() {
 	}
 	if cfg.UserPassword == "" || cfg.ModeratorPassword == "" {
 		fmt.Fprintln(os.Stderr, "Error: APP_USER_PASSWORD and APP_MODERATOR_PASSWORD must both be set")
+		os.Exit(1)
+	}
+	if (cfg.MetricsUsername == "") != (cfg.MetricsPassword == "") {
+		fmt.Fprintln(os.Stderr, "Error: METRICS_USERNAME and METRICS_PASSWORD must both be set or both be empty")
 		os.Exit(1)
 	}
 
@@ -502,7 +527,11 @@ func main() {
 
 	http.HandleFunc("/", srv.handleIndex)
 	http.HandleFunc("/join", srv.handleJoin)
-	http.Handle("/metrics", promhttp.Handler())
+	metricsHandler := promhttp.Handler()
+	if cfg.MetricsUsername != "" {
+		metricsHandler = basicAuthHandler(cfg.MetricsUsername, cfg.MetricsPassword, metricsHandler)
+	}
+	http.Handle("/metrics", metricsHandler)
 	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
 	log.Printf("Listening on http://%s", cfg.ListenAddr)
