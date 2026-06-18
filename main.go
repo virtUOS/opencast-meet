@@ -11,11 +11,13 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -110,6 +112,10 @@ var (
 		Name: "opencast_bbb_join_url_errors_total",
 		Help: "Failures building BBB join URL",
 	})
+	metricJoinRateLimited = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_join_rate_limited_total",
+		Help: "Join attempts rejected because the client IP was rate limited",
+	})
 )
 
 func init() {
@@ -120,6 +126,7 @@ func init() {
 		metricJoinViewer,
 		metricBBBErrors,
 		metricBBBJoinURLErrors,
+		metricJoinRateLimited,
 	)
 }
 
@@ -129,8 +136,9 @@ type rateLimiter struct {
 }
 
 type addrState struct {
-	failures int
-	lastSeen time.Time
+	failures     int
+	lastSeen     time.Time
+	blockedUntil time.Time
 }
 
 // calculateChecksum generates the SHA-256 checksum for BigBlueButton API calls.
@@ -147,8 +155,25 @@ const (
 	rlDelayMax   = 30 * time.Second
 )
 
-// recordFailure increments the failure counter for addr and returns the delay to apply.
-func (rl *rateLimiter) recordFailure(addr string) time.Duration {
+// retryAfter reports how long addr must wait before another attempt is allowed.
+// It returns 0 when addr is not currently blocked and does not mutate state.
+func (rl *rateLimiter) retryAfter(addr string) time.Duration {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.evictStale()
+	s := rl.addrs[addr]
+	if s == nil {
+		return 0
+	}
+	if d := time.Until(s.blockedUntil); d > 0 {
+		return d
+	}
+	return 0
+}
+
+// recordFailure increments the failure counter for addr and extends its block
+// window with exponential backoff (failures × rlDelayBase, capped at rlDelayMax).
+func (rl *rateLimiter) recordFailure(addr string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	rl.evictStale()
@@ -158,12 +183,20 @@ func (rl *rateLimiter) recordFailure(addr string) time.Duration {
 		rl.addrs[addr] = s
 	}
 	s.failures++
-	s.lastSeen = time.Now()
+	now := time.Now()
+	s.lastSeen = now
 	d := time.Duration(s.failures) * rlDelayBase
 	if d > rlDelayMax {
 		d = rlDelayMax
 	}
-	return d
+	s.blockedUntil = now.Add(d)
+}
+
+// reset clears any tracked state for addr, called after a successful login.
+func (rl *rateLimiter) reset(addr string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	delete(rl.addrs, addr)
 }
 
 func (rl *rateLimiter) activeIPs() int {
@@ -353,6 +386,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 	name := r.FormValue("name")
 	password := r.FormValue("password")
+	ip := s.clientIP(r)
 
 	renderError := func(msg string) {
 		redirectURL := "/?error=" + url.QueryEscape(msg)
@@ -360,6 +394,18 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 			redirectURL += "&name=" + url.QueryEscape(name)
 		}
 		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+	}
+
+	if d := s.limiter.retryAfter(ip); d > 0 {
+		metricJoinRateLimited.Inc()
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = s.tmpl.Execute(w, struct{ Error, Name string }{
+			Error: "Too many attempts. Please wait a moment and try again.",
+			Name:  name,
+		})
+		return
 	}
 
 	var role string
@@ -371,12 +417,12 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		role = "VIEWER"
 		metricJoinViewer.Inc()
 	default:
-		delay := s.limiter.recordFailure(s.clientIP(r))
-		time.Sleep(delay)
+		s.limiter.recordFailure(ip)
 		metricJoinInvalidPw.Inc()
 		renderError("Invalid password. Please try again.")
 		return
 	}
+	s.limiter.reset(ip)
 
 	createResp, err := createMeeting(s.config, s.httpClient)
 	if err != nil {
