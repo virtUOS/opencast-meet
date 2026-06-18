@@ -2,10 +2,13 @@ package main
 
 import (
 	"crypto/sha256"
+	"embed"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,48 +16,61 @@ import (
 	"github.com/joho/godotenv"
 )
 
+//go:embed static/index.html static/img
+var staticFiles embed.FS
+
 // VersionResponse represents the XML response from the /bigbluebutton/api/ endpoint
 type VersionResponse struct {
-	XMLName        xml.Name `xml:"response"`
-	ReturnCode     string   `xml:"returncode"`
-	Version        string   `xml:"version"`
-	APIVersion     string   `xml:"apiVersion"`
-	BBBVersion     string   `xml:"bbbVersion"`
-	HTML5PluginSdk string   `xml:"html5PluginSdkVersion"`
-	GraphQLWsUrl   string   `xml:"graphqlWebsocketUrl"`
-	GraphQLApiUrl  string   `xml:"graphqlApiUrl"`
+	XMLName    xml.Name `xml:"response"`
+	ReturnCode string   `xml:"returncode"`
+	BBBVersion string   `xml:"bbbVersion"`
 }
 
 // CreateResponse represents the XML response from the create API endpoint
 type CreateResponse struct {
-	XMLName       xml.Name `xml:"response"`
-	ReturnCode    string   `xml:"returncode"`
-	Message       string   `xml:"message"`
-	MessageKey    string   `xml:"messageKey"`
-	MeetingID     string   `xml:"meetingID"`
-	InternalID    string   `xml:"internalMeetingID"`
-	AttendeePW    string   `xml:"attendeePW"`
-	ModeratorPW   string   `xml:"moderatorPW"`
-	CreateTime    string   `xml:"createTime"`
-	VoiceBridge   string   `xml:"voiceBridge"`
-	DialNumber    string   `xml:"dialNumber"`
-	CreateTime2   string   `xml:"createDate"`
-	HasUserJoined string   `xml:"hasUserJoined"`
-	Duration      string   `xml:"duration"`
-	HasEnded      string   `xml:"hasBeenForciblyEnded"`
+	XMLName    xml.Name `xml:"response"`
+	ReturnCode string   `xml:"returncode"`
+	Message    string   `xml:"message"`
+	MessageKey string   `xml:"messageKey"`
+	MeetingID  string   `xml:"meetingID"`
 }
 
-// CalculateChecksum generates the SHA-256 checksum for BigBlueButton API calls
-// The checksum is calculated as: SHA256(callName + queryString + secret)
-func calculateChecksum(callName string, queryString string, secret string) string {
+// Config holds all runtime configuration loaded from environment variables.
+type Config struct {
+	BBBURL    string
+	BBBSecret string
+
+	MeetingID               string
+	MeetingName             string
+	MuteOnStart             string
+	Record                  string
+	AutoStartRecording      string
+	AllowStartStopRecording string
+	LoginURL                string
+	LogoutURL               string
+	WelcomeMessage          string
+	PreUploadedPresentation string
+
+	UserPassword      string
+	ModeratorPassword string
+	ListenAddr        string
+}
+
+type server struct {
+	config Config
+	tmpl   *template.Template
+}
+
+// calculateChecksum generates the SHA-256 checksum for BigBlueButton API calls.
+// Format: SHA256(callName + queryString + secret)
+func calculateChecksum(callName, queryString, secret string) string {
 	raw := callName + queryString + secret
 	hash := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(hash[:])
 }
 
-// getBBBVersion fetches the BigBlueButton server version
+// getBBBVersion fetches the BigBlueButton server version.
 func getBBBVersion(baseURL string) (*VersionResponse, error) {
-	// Build the request URL
 	apiURL, err := url.JoinPath(baseURL, "api")
 	if err != nil {
 		return nil, fmt.Errorf("failed to build API URL: %w", err)
@@ -79,33 +95,46 @@ func getBBBVersion(baseURL string) (*VersionResponse, error) {
 	return &versionResp, nil
 }
 
-// createMeeting creates a new meeting room on the BigBlueButton server
-func createMeeting(baseURL, secret string) (*CreateResponse, error) {
-	// Demo parameters for creating a meeting
-	meetingID := "demo-meeting-" + fmt.Sprintf("%d", os.Getpid()) + "-" + fmt.Sprintf("%d", len("Demo Meeting"))
-
-	// Build query string (URL encoded)
+// createMeeting ensures the configured meeting room exists on the BBB server.
+// BBB is idempotent on meetingID: returns the existing meeting if already running,
+// or creates a fresh one if it has ended.
+func createMeeting(cfg Config) (*CreateResponse, error) {
 	params := url.Values{}
-	params.Add("meetingID", meetingID)
-	params.Add("name", "Opencast Meeting")
-	params.Add("muteOnStart", "true")
-	params.Add("record", "true")
-	params.Add("autoStartRecording", "false")
-	params.Add("allowStartStopRecording", "true")
-	params.Add("loginURL", "https://meet.opencast.video")
-	params.Add("logoutURL", "https://meet.opencast.video")
-	params.Add("preUploadedPresentation", "https://meet.opencast.video/intentionally-invalid.pdf")
+	params.Add("meetingID", cfg.MeetingID)
+	params.Add("name", cfg.MeetingName)
+	if cfg.MuteOnStart != "" {
+		params.Add("muteOnStart", cfg.MuteOnStart)
+	}
+	if cfg.Record != "" {
+		params.Add("record", cfg.Record)
+	}
+	if cfg.AutoStartRecording != "" {
+		params.Add("autoStartRecording", cfg.AutoStartRecording)
+	}
+	if cfg.AllowStartStopRecording != "" {
+		params.Add("allowStartStopRecording", cfg.AllowStartStopRecording)
+	}
+	if cfg.LoginURL != "" {
+		params.Add("loginURL", cfg.LoginURL)
+	}
+	if cfg.LogoutURL != "" {
+		params.Add("logoutURL", cfg.LogoutURL)
+	}
+	if cfg.WelcomeMessage != "" {
+		params.Add("welcome", cfg.WelcomeMessage)
+	}
+	if cfg.PreUploadedPresentation != "" {
+		params.Add("preUploadedPresentation", cfg.PreUploadedPresentation)
+	}
 
-	// Calculate checksum
-	checksum := calculateChecksum("create", params.Encode(), secret)
+	checksum := calculateChecksum("create", params.Encode(), cfg.BBBSecret)
 	params.Add("checksum", checksum)
 
-	// Build the request URL
-	serverUrl, err := url.Parse(baseURL)
+	serverURL, err := url.Parse(cfg.BBBURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build API URL: %w", err)
+		return nil, fmt.Errorf("failed to parse BBB URL: %w", err)
 	}
-	apiURL := serverUrl.JoinPath("api", "create")
+	apiURL := serverURL.JoinPath("api", "create")
 	apiURL.RawQuery = params.Encode()
 
 	resp, err := http.Get(apiURL.String())
@@ -127,95 +156,157 @@ func createMeeting(baseURL, secret string) (*CreateResponse, error) {
 	return &createResp, nil
 }
 
-// generateJoinURL generates a BigBlueButton join URL for a participant
+// generateJoinURL builds a BBB join URL for the given participant name and role.
 func generateJoinURL(baseURL, meetingID, fullName, role, secret string) (string, error) {
-	// Build query string (URL encoded)
 	params := url.Values{}
 	params.Add("fullName", fullName)
 	params.Add("meetingID", meetingID)
 	params.Add("role", role)
 
-	// Calculate checksum
 	checksum := calculateChecksum("join", params.Encode(), secret)
 	params.Add("checksum", checksum)
 
-	// Build the request URL
-	serverUrl, err := url.Parse(baseURL)
+	serverURL, err := url.Parse(baseURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to build API URL: %w", err)
+		return "", fmt.Errorf("failed to parse BBB URL: %w", err)
 	}
-	joinURL := serverUrl.JoinPath("api", "join")
+	joinURL := serverURL.JoinPath("api", "join")
 	joinURL.RawQuery = params.Encode()
 
 	return joinURL.String(), nil
 }
 
+func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.tmpl.Execute(w, nil)
+}
+
+func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	name := r.FormValue("name")
+	password := r.FormValue("password")
+
+	renderError := func(msg string) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		s.tmpl.Execute(w, struct{ Error string }{msg})
+	}
+
+	var role string
+	switch password {
+	case s.config.ModeratorPassword:
+		role = "MODERATOR"
+	case s.config.UserPassword:
+		role = "VIEWER"
+	default:
+		renderError("Invalid password. Please try again.")
+		return
+	}
+
+	createResp, err := createMeeting(s.config)
+	if err != nil {
+		log.Printf("error creating meeting: %v", err)
+		renderError("Could not connect to the meeting server. Please try again later.")
+		return
+	}
+	if createResp.ReturnCode != "SUCCESS" {
+		log.Printf("BBB create returned non-success: %s / %s", createResp.MessageKey, createResp.Message)
+		renderError("The meeting server returned an error. Please try again later.")
+		return
+	}
+
+	joinURL, err := generateJoinURL(s.config.BBBURL, createResp.MeetingID, name, role, s.config.BBBSecret)
+	if err != nil {
+		log.Printf("error generating join URL: %v", err)
+		renderError("Could not generate a join link. Please try again later.")
+		return
+	}
+
+	http.Redirect(w, r, joinURL, http.StatusFound)
+}
+
+func loadConfig() Config {
+	return Config{
+		BBBURL:    os.Getenv("BBB_SERVER_URL"),
+		BBBSecret: os.Getenv("BBB_SERVER_SECRET"),
+
+		MeetingID:               getEnvDefault("BBB_MEETING_ID", "opencast-meet"),
+		MeetingName:             getEnvDefault("BBB_MEETING_NAME", "Opencast Meeting"),
+		MuteOnStart:             os.Getenv("BBB_MUTE_ON_START"),
+		Record:                  os.Getenv("BBB_RECORD"),
+		AutoStartRecording:      os.Getenv("BBB_AUTO_START_RECORDING"),
+		AllowStartStopRecording: os.Getenv("BBB_ALLOW_START_STOP_RECORDING"),
+		LoginURL:                os.Getenv("BBB_LOGIN_URL"),
+		LogoutURL:               os.Getenv("BBB_LOGOUT_URL"),
+		WelcomeMessage:          os.Getenv("BBB_WELCOME_MESSAGE"),
+		PreUploadedPresentation: os.Getenv("BBB_PRE_UPLOADED_PRESENTATION"),
+
+		UserPassword:      os.Getenv("APP_USER_PASSWORD"),
+		ModeratorPassword: os.Getenv("APP_MODERATOR_PASSWORD"),
+		ListenAddr:        getEnvDefault("APP_LISTEN_ADDR", "127.0.0.1:8080"),
+	}
+}
+
+func getEnvDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
-	// Optionally load .env file (silently ignore if not found)
 	_ = godotenv.Load()
 
-	// Read environment variables
-	bbbURL := os.Getenv("BBB_SERVER_URL")
-	bbbSecret := os.Getenv("BBB_SERVER_SECRET")
+	cfg := loadConfig()
 
-	if bbbURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_URL environment variable is not set")
+	if cfg.BBBURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_URL is not set")
+		os.Exit(1)
+	}
+	if cfg.BBBSecret == "" {
+		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_SECRET is not set")
+		os.Exit(1)
+	}
+	if cfg.UserPassword == "" || cfg.ModeratorPassword == "" {
+		fmt.Fprintln(os.Stderr, "Error: APP_USER_PASSWORD and APP_MODERATOR_PASSWORD must both be set")
 		os.Exit(1)
 	}
 
-	if bbbSecret == "" {
-		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_SECRET environment variable is not set")
-		os.Exit(1)
-	}
-
-	// Get and print the BBB version
-	fmt.Println("=== Getting BigBlueButton Version ===")
-	versionResp, err := getBBBVersion(bbbURL)
+	// Startup connection check — warn but don't abort if BBB is unreachable.
+	versionResp, err := getBBBVersion(cfg.BBBURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting version: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Warning: could not reach BBB server: %v\n", err)
+	} else {
+		log.Printf("Connected to BigBlueButton %s", versionResp.BBBVersion)
 	}
 
-	fmt.Printf("BigBlueButton Version: %s\n", versionResp.BBBVersion)
-	fmt.Println()
-
-	// Create a meeting
-	fmt.Println("=== Creating Meeting ===")
-	createResp, err := createMeeting(bbbURL, bbbSecret)
+	tmplData, err := staticFiles.ReadFile("static/index.html")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating meeting: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error reading template: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Print the create response
-	fmt.Printf("Return Code: %s\n", createResp.ReturnCode)
-	fmt.Printf("Message: %s\n", createResp.Message)
-	fmt.Printf("Message Key: %s\n", createResp.MessageKey)
-	fmt.Printf("Meeting ID: %s\n", createResp.MeetingID)
-	fmt.Printf("Internal ID: %s\n", createResp.InternalID)
-	fmt.Printf("Attendee Password: %s\n", createResp.AttendeePW)
-	fmt.Printf("Moderator Password: %s\n", createResp.ModeratorPW)
-	fmt.Printf("Voice Bridge: %s\n", createResp.VoiceBridge)
-	fmt.Printf("Dial Number: %s\n", createResp.DialNumber)
-	fmt.Println()
-
-	// Generate and print join URLs
-	fmt.Println("=== Join URLs ===")
-	fmt.Println("Join URLs are generated using the role parameter (MODERATOR/VIEWER)")
-
-	// Generate moderator join URL
-	moderatorURL, err := generateJoinURL(bbbURL, createResp.MeetingID, "Moderator", "MODERATOR", bbbSecret)
+	tmpl, err := template.New("index").Parse(string(tmplData))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating moderator join URL: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error parsing template: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Moderator Join URL:\n%s\n\n", moderatorURL)
 
-	// Generate attendee join URL
-	attendeeURL, err := generateJoinURL(bbbURL, createResp.MeetingID, "Attendee", "VIEWER", bbbSecret)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating attendee join URL: %v\n", err)
+	srv := &server{config: cfg, tmpl: tmpl}
+
+	http.HandleFunc("/", srv.handleIndex)
+	http.HandleFunc("/join", srv.handleJoin)
+	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
+
+	log.Printf("Listening on http://%s", cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Attendee Join URL:\n%s\n", attendeeURL)
 }
