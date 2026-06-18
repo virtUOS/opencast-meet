@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 //go:embed static/index.html static/img
@@ -79,6 +81,44 @@ type server struct {
 	limiter    *rateLimiter
 }
 
+var (
+	metricJoinAttempts = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_join_attempts_total",
+		Help: "Total join form submissions",
+	})
+	metricJoinInvalidPw = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_join_invalid_password_total",
+		Help: "Join attempts with invalid password",
+	})
+	metricJoinModerator = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_join_moderator_total",
+		Help: "Logins with moderator credential",
+	})
+	metricJoinViewer = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_join_viewer_total",
+		Help: "Logins with viewer credential",
+	})
+	metricBBBErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_bbb_errors_total",
+		Help: "Failures from BigBlueButton API calls",
+	})
+	metricBBBJoinURLErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "opencast_bbb_join_url_errors_total",
+		Help: "Failures building BBB join URL",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(
+		metricJoinAttempts,
+		metricJoinInvalidPw,
+		metricJoinModerator,
+		metricJoinViewer,
+		metricBBBErrors,
+		metricBBBJoinURLErrors,
+	)
+}
+
 type rateLimiter struct {
 	mu    sync.Mutex
 	addrs map[string]*addrState
@@ -120,6 +160,12 @@ func (rl *rateLimiter) recordFailure(addr string) time.Duration {
 		d = rlDelayMax
 	}
 	return d
+}
+
+func (rl *rateLimiter) activeIPs() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return len(rl.addrs)
 }
 
 // evictStale removes entries quiet for longer than rlResetAfter.
@@ -299,6 +345,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	metricJoinAttempts.Inc()
 
 	name := r.FormValue("name")
 	password := r.FormValue("password")
@@ -315,11 +362,14 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	switch password {
 	case s.config.ModeratorPassword:
 		role = "MODERATOR"
+		metricJoinModerator.Inc()
 	case s.config.UserPassword:
 		role = "VIEWER"
+		metricJoinViewer.Inc()
 	default:
 		delay := s.limiter.recordFailure(s.clientIP(r))
 		time.Sleep(delay)
+		metricJoinInvalidPw.Inc()
 		renderError("Invalid password. Please try again.")
 		return
 	}
@@ -327,11 +377,13 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	createResp, err := createMeeting(s.config, s.httpClient)
 	if err != nil {
 		log.Printf("error creating meeting: %v", err)
+		metricBBBErrors.Inc()
 		renderError("Could not connect to the meeting server. Please try again later.")
 		return
 	}
 	if createResp.ReturnCode != "SUCCESS" {
 		log.Printf("BBB create returned non-success: %s / %s", createResp.MessageKey, createResp.Message)
+		metricBBBErrors.Inc()
 		renderError("The meeting server returned an error. Please try again later.")
 		return
 	}
@@ -339,12 +391,14 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	joinURL, err := generateJoinURL(s.config.BBBURL, createResp.MeetingID, name, role, s.config.BBBSecret)
 	if err != nil {
 		log.Printf("error generating join URL: %v", err)
+		metricBBBJoinURLErrors.Inc()
 		renderError("Could not generate a join link. Please try again later.")
 		return
 	}
 
 	http.Redirect(w, r, joinURL, http.StatusFound)
 }
+
 
 func loadConfig() Config {
 	return Config{
@@ -438,9 +492,17 @@ func main() {
 		httpClient: httpClient,
 		limiter:    &rateLimiter{addrs: make(map[string]*addrState)},
 	}
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Name: "opencast_ratelimit_tracked_ips",
+			Help: "IPs currently tracked by the rate limiter",
+		},
+		func() float64 { return float64(srv.limiter.activeIPs()) },
+	))
 
 	http.HandleFunc("/", srv.handleIndex)
 	http.HandleFunc("/join", srv.handleJoin)
+	http.Handle("/metrics", promhttp.Handler())
 	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
 	log.Printf("Listening on http://%s", cfg.ListenAddr)
