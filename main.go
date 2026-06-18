@@ -54,6 +54,13 @@ type Config struct {
 	UserPassword      string
 	ModeratorPassword string
 	ListenAddr        string
+
+	// Opencast metadata (passed as meta_* on BBB create)
+	OCSeriesID      string
+	OCDCCreator     string
+	OCAddWebcams    string
+	OCACLReadRoles  string
+	OCACLWriteRoles string
 }
 
 type server struct {
@@ -125,6 +132,22 @@ func createMeeting(cfg Config) (*CreateResponse, error) {
 	}
 	if cfg.PreUploadedPresentation != "" {
 		params.Add("preUploadedPresentation", cfg.PreUploadedPresentation)
+	}
+	if cfg.OCSeriesID != "" {
+		params.Add("meta_opencast-dc-isPartOf", cfg.OCSeriesID)
+		params.Add("meta_opencast-dc-title", cfg.MeetingName)
+	}
+	if cfg.OCDCCreator != "" {
+		params.Add("meta_opencast-dc-creator", cfg.OCDCCreator)
+	}
+	if cfg.OCAddWebcams != "" {
+		params.Add("meta_opencast-add-webcams", cfg.OCAddWebcams)
+	}
+	if cfg.OCACLReadRoles != "" {
+		params.Add("meta_opencast-acl-read-roles", cfg.OCACLReadRoles)
+	}
+	if cfg.OCACLWriteRoles != "" {
+		params.Add("meta_opencast-acl-write-roles", cfg.OCACLWriteRoles)
 	}
 
 	checksum := calculateChecksum("create", params.Encode(), cfg.BBBSecret)
@@ -257,6 +280,12 @@ func loadConfig() Config {
 		UserPassword:      os.Getenv("APP_USER_PASSWORD"),
 		ModeratorPassword: os.Getenv("APP_MODERATOR_PASSWORD"),
 		ListenAddr:        getEnvDefault("APP_LISTEN_ADDR", "127.0.0.1:8080"),
+
+		OCSeriesID:      os.Getenv("OC_SERIES_ID"),
+		OCDCCreator:     os.Getenv("OC_DC_CREATOR"),
+		OCAddWebcams:    os.Getenv("OC_ADD_WEBCAMS"),
+		OCACLReadRoles:  os.Getenv("OC_ACL_READ_ROLES"),
+		OCACLWriteRoles: os.Getenv("OC_ACL_WRITE_ROLES"),
 	}
 }
 
