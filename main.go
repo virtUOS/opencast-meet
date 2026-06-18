@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,8 @@ type Config struct {
 	OCAddWebcams    string
 	OCACLReadRoles  string
 	OCACLWriteRoles string
+
+	EnableRealIP bool
 }
 
 type server struct {
@@ -130,8 +133,17 @@ func (rl *rateLimiter) evictStale() {
 	}
 }
 
-// clientIP returns the host part of r.RemoteAddr, stripping the port.
-func clientIP(r *http.Request) string {
+// clientIP returns the client's IP address. When EnableRealIP is set it checks
+// trusted proxy headers before falling back to r.RemoteAddr.
+func (s *server) clientIP(r *http.Request) string {
+	if s.config.EnableRealIP {
+		if v := r.Header.Get("X-Real-IP"); v != "" {
+			return strings.TrimSpace(v)
+		}
+		if v := r.Header.Get("X-Forwarded-For"); v != "" {
+			return strings.TrimSpace(strings.SplitN(v, ",", 2)[0])
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -306,7 +318,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	case s.config.UserPassword:
 		role = "VIEWER"
 	default:
-		delay := s.limiter.recordFailure(clientIP(r))
+		delay := s.limiter.recordFailure(s.clientIP(r))
 		time.Sleep(delay)
 		renderError("Invalid password. Please try again.")
 		return
@@ -359,6 +371,8 @@ func loadConfig() Config {
 		OCAddWebcams:    os.Getenv("OC_ADD_WEBCAMS"),
 		OCACLReadRoles:  os.Getenv("OC_ACL_READ_ROLES"),
 		OCACLWriteRoles: os.Getenv("OC_ACL_WRITE_ROLES"),
+
+		EnableRealIP: strings.EqualFold(os.Getenv("ENABLE_REAL_IP"), "true"),
 	}
 }
 
