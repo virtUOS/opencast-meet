@@ -10,9 +10,11 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -69,6 +71,17 @@ type server struct {
 	config     Config
 	tmpl       *template.Template
 	httpClient *http.Client
+	limiter    *rateLimiter
+}
+
+type rateLimiter struct {
+	mu    sync.Mutex
+	addrs map[string]*addrState
+}
+
+type addrState struct {
+	failures int
+	lastSeen time.Time
 }
 
 // calculateChecksum generates the SHA-256 checksum for BigBlueButton API calls.
@@ -77,6 +90,51 @@ func calculateChecksum(callName, queryString, secret string) string {
 	raw := callName + queryString + secret
 	hash := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(hash[:])
+}
+
+const (
+	rlResetAfter = 10 * time.Minute
+	rlDelayBase  = 2 * time.Second
+	rlDelayMax   = 30 * time.Second
+)
+
+// recordFailure increments the failure counter for addr and returns the delay to apply.
+func (rl *rateLimiter) recordFailure(addr string) time.Duration {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.evictStale()
+	s := rl.addrs[addr]
+	if s == nil {
+		s = &addrState{}
+		rl.addrs[addr] = s
+	}
+	s.failures++
+	s.lastSeen = time.Now()
+	d := time.Duration(s.failures) * rlDelayBase
+	if d > rlDelayMax {
+		d = rlDelayMax
+	}
+	return d
+}
+
+// evictStale removes entries quiet for longer than rlResetAfter.
+// Must be called with rl.mu held.
+func (rl *rateLimiter) evictStale() {
+	cutoff := time.Now().Add(-rlResetAfter)
+	for k, s := range rl.addrs {
+		if s.lastSeen.Before(cutoff) {
+			delete(rl.addrs, k)
+		}
+	}
+}
+
+// clientIP returns the host part of r.RemoteAddr, stripping the port.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // getBBBVersion fetches the BigBlueButton server version.
@@ -111,7 +169,8 @@ func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error
 func createMeeting(cfg Config, client *http.Client) (*CreateResponse, error) {
 	params := url.Values{}
 	params.Add("meetingID", cfg.MeetingID)
-	params.Add("name", cfg.MeetingName)
+	name := cfg.MeetingName
+	params.Add("name", name)
 	if cfg.MuteOnStart != "" {
 		params.Add("muteOnStart", cfg.MuteOnStart)
 	}
@@ -138,7 +197,7 @@ func createMeeting(cfg Config, client *http.Client) (*CreateResponse, error) {
 	}
 	if cfg.OCSeriesID != "" {
 		params.Add("meta_opencast-dc-isPartOf", cfg.OCSeriesID)
-		params.Add("meta_opencast-dc-title", cfg.MeetingName)
+		params.Add("meta_opencast-dc-title", name)
 	}
 	if cfg.OCDCCreator != "" {
 		params.Add("meta_opencast-dc-creator", cfg.OCDCCreator)
@@ -238,6 +297,8 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	case s.config.UserPassword:
 		role = "VIEWER"
 	default:
+		delay := s.limiter.recordFailure(clientIP(r))
+		time.Sleep(delay)
 		renderError("Invalid password. Please try again.")
 		return
 	}
@@ -348,7 +409,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &server{config: cfg, tmpl: tmpl, httpClient: httpClient}
+	srv := &server{
+		config:     cfg,
+		tmpl:       tmpl,
+		httpClient: httpClient,
+		limiter:    &rateLimiter{addrs: make(map[string]*addrState)},
+	}
 
 	http.HandleFunc("/", srv.handleIndex)
 	http.HandleFunc("/join", srv.handleJoin)
