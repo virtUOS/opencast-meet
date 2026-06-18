@@ -182,7 +182,10 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.tmpl.Execute(w, nil)
+	s.tmpl.Execute(w, struct{ Error, Name string }{
+		Error: r.URL.Query().Get("error"),
+		Name:  r.URL.Query().Get("name"),
+	})
 }
 
 func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
@@ -195,8 +198,11 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 
 	renderError := func(msg string) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		s.tmpl.Execute(w, struct{ Error string }{msg})
+		redirectURL := "/?error=" + url.QueryEscape(msg)
+		if name != "" {
+			redirectURL += "&name=" + url.QueryEscape(name)
+		}
+		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 	}
 
 	var role string
