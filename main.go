@@ -47,13 +47,18 @@ type CreateResponse struct {
 	MeetingID  string   `xml:"meetingID"`
 }
 
+// Room is a single BBB meeting room entry.
+type Room struct {
+	ID   string
+	Name string
+}
+
 // Config holds all runtime configuration loaded from environment variables.
 type Config struct {
 	BBBURL    string
 	BBBSecret string
 
-	MeetingID               string
-	MeetingName             string
+	Rooms                   []Room
 	MuteOnStart             string
 	Record                  string
 	AutoStartRecording      string
@@ -270,10 +275,10 @@ func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error
 // createMeeting ensures the configured meeting room exists on the BBB server.
 // BBB is idempotent on meetingID: returns the existing meeting if already running,
 // or creates a fresh one if it has ended.
-func createMeeting(cfg Config, client *http.Client) (*CreateResponse, error) {
+func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse, error) {
 	params := url.Values{}
-	params.Add("meetingID", cfg.MeetingID)
-	name := expandPlaceholders(cfg.MeetingName)
+	params.Add("meetingID", room.ID)
+	name := expandPlaceholders(room.Name)
 	params.Add("name", name)
 	if cfg.MuteOnStart != "" {
 		params.Add("muteOnStart", cfg.MuteOnStart)
@@ -365,16 +370,33 @@ func generateJoinURL(baseURL, meetingID, fullName, role, secret string) (string,
 	return joinURL.String(), nil
 }
 
+type indexTemplateData struct {
+	Error        string
+	Name         string
+	Rooms        []Room
+	SelectedRoom string
+}
+
+func (s *server) indexData(errMsg, name, selectedRoom string) indexTemplateData {
+	return indexTemplateData{
+		Error:        errMsg,
+		Name:         name,
+		Rooms:        s.config.Rooms,
+		SelectedRoom: selectedRoom,
+	}
+}
+
 func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.tmpl.Execute(w, struct{ Error, Name string }{
-		Error: r.URL.Query().Get("error"),
-		Name:  r.URL.Query().Get("name"),
-	})
+	s.tmpl.Execute(w, s.indexData(
+		r.URL.Query().Get("error"),
+		r.URL.Query().Get("name"),
+		r.URL.Query().Get("room"),
+	))
 }
 
 func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
@@ -386,12 +408,18 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 	name := r.FormValue("name")
 	password := r.FormValue("password")
+	roomID := r.FormValue("room")
 	ip := s.clientIP(r)
+
+	room := findRoom(s.config.Rooms, roomID)
 
 	renderError := func(msg string) {
 		redirectURL := "/?error=" + url.QueryEscape(msg)
 		if name != "" {
 			redirectURL += "&name=" + url.QueryEscape(name)
+		}
+		if len(s.config.Rooms) > 1 {
+			redirectURL += "&room=" + url.QueryEscape(room.ID)
 		}
 		http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 	}
@@ -401,10 +429,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_ = s.tmpl.Execute(w, struct{ Error, Name string }{
-			Error: "Too many attempts. Please wait a moment and try again.",
-			Name:  name,
-		})
+		_ = s.tmpl.Execute(w, s.indexData("Too many attempts. Please wait a moment and try again.", name, room.ID))
 		return
 	}
 
@@ -424,7 +449,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.limiter.reset(ip)
 
-	createResp, err := createMeeting(s.config, s.httpClient)
+	createResp, err := createMeeting(s.config, room, s.httpClient)
 	if err != nil {
 		log.Printf("error creating meeting: %v", err)
 		metricBBBErrors.Inc()
@@ -464,13 +489,51 @@ func basicAuthHandler(username, password string, next http.Handler) http.Handler
 	})
 }
 
-func loadConfig() Config {
+func splitTrimmed(s string) []string {
+	parts := strings.Split(s, ",")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
+}
+
+func buildRooms(ids, names []string) ([]Room, error) {
+	if len(ids) != len(names) {
+		return nil, fmt.Errorf(
+			"BBB_MEETING_ID has %d entries but BBB_MEETING_NAME has %d; counts must match",
+			len(ids), len(names),
+		)
+	}
+	rooms := make([]Room, len(ids))
+	for i, id := range ids {
+		rooms[i] = Room{ID: id, Name: names[i]}
+	}
+	return rooms, nil
+}
+
+func findRoom(rooms []Room, id string) Room {
+	for _, r := range rooms {
+		if r.ID == id {
+			return r
+		}
+	}
+	return rooms[0]
+}
+
+func loadConfig() (Config, error) {
+	ids := splitTrimmed(getEnvDefault("BBB_MEETING_ID", "opencast-meet"))
+	names := splitTrimmed(getEnvDefault("BBB_MEETING_NAME", "Opencast Meeting"))
+
+	rooms, err := buildRooms(ids, names)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		BBBURL:    os.Getenv("BBB_SERVER_URL"),
 		BBBSecret: os.Getenv("BBB_SERVER_SECRET"),
 
-		MeetingID:               getEnvDefault("BBB_MEETING_ID", "opencast-meet"),
-		MeetingName:             getEnvDefault("BBB_MEETING_NAME", "Opencast Meeting"),
+		Rooms:       rooms,
 		MuteOnStart:             os.Getenv("BBB_MUTE_ON_START"),
 		Record:                  os.Getenv("BBB_RECORD"),
 		AutoStartRecording:      os.Getenv("BBB_AUTO_START_RECORDING"),
@@ -494,7 +557,7 @@ func loadConfig() Config {
 
 		MetricsUsername: os.Getenv("METRICS_USERNAME"),
 		MetricsPassword: os.Getenv("METRICS_PASSWORD"),
-	}
+	}, nil
 }
 
 func getEnvDefault(key, fallback string) string {
@@ -517,7 +580,11 @@ func main() {
 		_ = godotenv.Load()
 	}
 
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	if cfg.BBBURL == "" {
 		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_URL is not set")

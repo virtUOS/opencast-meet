@@ -31,8 +31,8 @@ started.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `BBB_MEETING_ID` | `opencast-meet` | Stable room identifier |
-| `BBB_MEETING_NAME` | `Opencast Meeting` | Room display name |
+| `BBB_MEETING_ID` | `opencast-meet` | Stable room identifier. Use a comma-separated list for multiple rooms (e.g. `room-a,room-b`). |
+| `BBB_MEETING_NAME` | `Opencast Meeting` | Room display name. Use a comma-separated list matching `BBB_MEETING_ID` (e.g. `Room A,Room B`). Supports `{{DATE}}` placeholder. When multiple rooms are configured a dropdown appears in the login form. |
 | `BBB_MUTE_ON_START` | | Mute participants on join |
 | `BBB_RECORD` | | Enable recording |
 | `BBB_AUTO_START_RECORDING` | | Start recording immediately |
