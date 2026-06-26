@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-//go:embed static/index.html static/img
+//go:embed static/index.html static/img static/js
 var staticFiles embed.FS
 
 // ///
@@ -353,18 +353,21 @@ func generateJoinURL(baseURL, meetingID, fullName, role, secret string) (string,
 }
 
 type indexTemplateData struct {
-	Error        string
-	Name         string
-	Rooms        []Room
-	SelectedRoom string
+	Error                  string
+	Name                   string
+	Rooms                  []Room
+	SelectedRoom           string
+	SelectedRoomRecordable bool
 }
 
 func (s *server) indexData(errMsg, name, selectedRoom string) indexTemplateData {
+	room := findRoom(s.config.Rooms, selectedRoom)
 	return indexTemplateData{
-		Error:        errMsg,
-		Name:         name,
-		Rooms:        s.config.Rooms,
-		SelectedRoom: selectedRoom,
+		Error:                  errMsg,
+		Name:                   name,
+		Rooms:                  s.config.Rooms,
+		SelectedRoom:           selectedRoom,
+		SelectedRoomRecordable: room.Record == "true",
 	}
 }
 
@@ -430,6 +433,11 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.reset(ip)
+
+	if room.Record == "true" && r.FormValue("recording_consent") != "on" {
+		renderError("You must consent to the recording to enter this room.")
+		return
+	}
 
 	createResp, err := createMeeting(s.config, room, s.httpClient)
 	if err != nil {
