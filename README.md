@@ -62,14 +62,13 @@ These settings apply to all rooms.
 | Variable            | Description
 | ------------------- | -------------------
 | `BBB_MUTE_ON_START` | Mute participants on join
-| `BBB_LOGIN_URL`     | Redirect URL on login
-| `BBB_LOGOUT_URL`    | Redirect URL after leaving the meeting
 
 ### Server
 
 | Variable           | Default          | Description
 | ------------------ | ---------------- | -------------------
 | `APP_LISTEN_ADDR`  | `127.0.0.1:8080` | HTTP listen address
+| `APP_FRONTEND_URL` |                  | Used as BBB  redirect URL
 | `ENABLE_REAL_IP`   | `false`          | Extract client IP from `X-Forwarded-For` / `X-Real-IP` headers; enable when running behind a trusted reverse proxy
 | `METRICS_USERNAME` |                  | Username for `/metrics` Basic Auth (must be paired with `METRICS_PASSWORD`)
 | `METRICS_PASSWORD` |                  | Password for `/metrics` Basic Auth (must be paired with `METRICS_USERNAME`)

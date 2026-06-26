@@ -70,8 +70,7 @@ type Config struct {
 
 	Rooms       []Room
 	MuteOnStart string
-	LoginURL    string
-	LogoutURL   string
+	FrontendURL string
 
 	UserPassword      string
 	ModeratorPassword string
@@ -286,11 +285,9 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 	if room.AllowStartStopRecording != "" {
 		params.Add("allowStartStopRecording", room.AllowStartStopRecording)
 	}
-	if cfg.LoginURL != "" {
-		params.Add("loginURL", cfg.LoginURL)
-	}
-	if cfg.LogoutURL != "" {
-		params.Add("logoutURL", cfg.LogoutURL)
+	if cfg.FrontendURL != "" {
+		params.Add("loginURL", cfg.FrontendURL)
+		params.Add("logoutURL", cfg.FrontendURL)
 	}
 	if room.WelcomeMessage != "" {
 		params.Add("welcome", room.WelcomeMessage)
@@ -533,8 +530,7 @@ func loadConfig() (Config, error) {
 
 		Rooms:       rooms,
 		MuteOnStart: os.Getenv("BBB_MUTE_ON_START"),
-		LoginURL:    os.Getenv("BBB_LOGIN_URL"),
-		LogoutURL:   os.Getenv("BBB_LOGOUT_URL"),
+		FrontendURL: os.Getenv("APP_FRONTEND_URL"),
 
 		UserPassword:      os.Getenv("APP_USER_PASSWORD"),
 		ModeratorPassword: os.Getenv("APP_MODERATOR_PASSWORD"),
