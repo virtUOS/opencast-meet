@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,8 +48,19 @@ type CreateResponse struct {
 
 // Room is a single BBB meeting room entry.
 type Room struct {
-	ID   string
-	Name string
+	ID                      string
+	Name                    string
+	Record                  string
+	AutoStartRecording      string
+	AllowStartStopRecording string
+	WelcomeMessage          string
+	PreUploadedPresentation string
+	OCSeriesID              string
+	OCDCCreator             string
+	OCAddWebcams            string
+	OCACLReadRoles          string
+	OCACLWriteRoles         string
+	AppendDate              bool
 }
 
 // Config holds all runtime configuration loaded from environment variables.
@@ -58,15 +68,10 @@ type Config struct {
 	BBBURL    string
 	BBBSecret string
 
-	Rooms                   []Room
-	MuteOnStart             string
-	Record                  string
-	AutoStartRecording      string
-	AllowStartStopRecording string
-	LoginURL                string
-	LogoutURL               string
-	WelcomeMessage          string
-	PreUploadedPresentation string
+	Rooms       []Room
+	MuteOnStart string
+	LoginURL    string
+	LogoutURL   string
 
 	UserPassword      string
 	ModeratorPassword string
@@ -74,13 +79,6 @@ type Config struct {
 
 	MetricsUsername string
 	MetricsPassword string
-
-	// Opencast metadata (passed as meta_* on BBB create)
-	OCSeriesID      string
-	OCDCCreator     string
-	OCAddWebcams    string
-	OCACLReadRoles  string
-	OCACLWriteRoles string
 
 	EnableRealIP bool
 }
@@ -239,13 +237,6 @@ func (s *server) clientIP(r *http.Request) string {
 	return host
 }
 
-var reDate = regexp.MustCompile(`{{\s*DATE\s*}}`)
-
-// expandPlaceholders replaces {{DATE}} (spaces optional) with today's date (YYYY-MM-DD).
-func expandPlaceholders(s string) string {
-	return reDate.ReplaceAllString(s, time.Now().Format("2006-01-02"))
-}
-
 // getBBBVersion fetches the BigBlueButton server version.
 func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error) {
 	apiURL, err := url.JoinPath(baseURL, "api")
@@ -278,19 +269,22 @@ func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error
 func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse, error) {
 	params := url.Values{}
 	params.Add("meetingID", room.ID)
-	name := expandPlaceholders(room.Name)
+	name := room.Name
+	if room.AppendDate {
+		name += " | " + time.Now().Format("2006-01-02")
+	}
 	params.Add("name", name)
 	if cfg.MuteOnStart != "" {
 		params.Add("muteOnStart", cfg.MuteOnStart)
 	}
-	if cfg.Record != "" {
-		params.Add("record", cfg.Record)
+	if room.Record != "" {
+		params.Add("record", room.Record)
 	}
-	if cfg.AutoStartRecording != "" {
-		params.Add("autoStartRecording", cfg.AutoStartRecording)
+	if room.AutoStartRecording != "" {
+		params.Add("autoStartRecording", room.AutoStartRecording)
 	}
-	if cfg.AllowStartStopRecording != "" {
-		params.Add("allowStartStopRecording", cfg.AllowStartStopRecording)
+	if room.AllowStartStopRecording != "" {
+		params.Add("allowStartStopRecording", room.AllowStartStopRecording)
 	}
 	if cfg.LoginURL != "" {
 		params.Add("loginURL", cfg.LoginURL)
@@ -298,27 +292,27 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 	if cfg.LogoutURL != "" {
 		params.Add("logoutURL", cfg.LogoutURL)
 	}
-	if cfg.WelcomeMessage != "" {
-		params.Add("welcome", cfg.WelcomeMessage)
+	if room.WelcomeMessage != "" {
+		params.Add("welcome", room.WelcomeMessage)
 	}
-	if cfg.PreUploadedPresentation != "" {
-		params.Add("preUploadedPresentation", cfg.PreUploadedPresentation)
+	if room.PreUploadedPresentation != "" {
+		params.Add("preUploadedPresentation", room.PreUploadedPresentation)
 	}
-	if cfg.OCSeriesID != "" {
-		params.Add("meta_opencast-dc-isPartOf", cfg.OCSeriesID)
+	if room.OCSeriesID != "" {
+		params.Add("meta_opencast-dc-isPartOf", room.OCSeriesID)
 		params.Add("meta_opencast-dc-title", name)
 	}
-	if cfg.OCDCCreator != "" {
-		params.Add("meta_opencast-dc-creator", cfg.OCDCCreator)
+	if room.OCDCCreator != "" {
+		params.Add("meta_opencast-dc-creator", room.OCDCCreator)
 	}
-	if cfg.OCAddWebcams != "" {
-		params.Add("meta_opencast-add-webcams", cfg.OCAddWebcams)
+	if room.OCAddWebcams != "" {
+		params.Add("meta_opencast-add-webcams", room.OCAddWebcams)
 	}
-	if cfg.OCACLReadRoles != "" {
-		params.Add("meta_opencast-acl-read-roles", cfg.OCACLReadRoles)
+	if room.OCACLReadRoles != "" {
+		params.Add("meta_opencast-acl-read-roles", room.OCACLReadRoles)
 	}
-	if cfg.OCACLWriteRoles != "" {
-		params.Add("meta_opencast-acl-write-roles", cfg.OCACLWriteRoles)
+	if room.OCACLWriteRoles != "" {
+		params.Add("meta_opencast-acl-write-roles", room.OCACLWriteRoles)
 	}
 
 	checksum := calculateChecksum("create", params.Encode(), cfg.BBBSecret)
@@ -489,24 +483,31 @@ func basicAuthHandler(username, password string, next http.Handler) http.Handler
 	})
 }
 
-func splitTrimmed(s string) []string {
-	parts := strings.Split(s, ",")
-	for i, p := range parts {
-		parts[i] = strings.TrimSpace(p)
+func loadRooms() ([]Room, error) {
+	var rooms []Room
+	for i := 1; ; i++ {
+		id := os.Getenv(fmt.Sprintf("ROOM_%d_ID", i))
+		if id == "" {
+			break
+		}
+		rooms = append(rooms, Room{
+			ID:                      id,
+			Name:                    os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i)),
+			Record:                  os.Getenv(fmt.Sprintf("ROOM_%d_RECORD", i)),
+			AutoStartRecording:      os.Getenv(fmt.Sprintf("ROOM_%d_AUTO_START_RECORDING", i)),
+			AllowStartStopRecording: os.Getenv(fmt.Sprintf("ROOM_%d_ALLOW_START_STOP_RECORDING", i)),
+			WelcomeMessage:          os.Getenv(fmt.Sprintf("ROOM_%d_WELCOME_MESSAGE", i)),
+			PreUploadedPresentation: os.Getenv(fmt.Sprintf("ROOM_%d_PRE_UPLOADED_PRESENTATION", i)),
+			OCSeriesID:              os.Getenv(fmt.Sprintf("ROOM_%d_OC_SERIES", i)),
+			OCDCCreator:             os.Getenv(fmt.Sprintf("ROOM_%d_OC_DC_CREATOR", i)),
+			OCAddWebcams:            os.Getenv(fmt.Sprintf("ROOM_%d_OC_ADD_WEBCAMS", i)),
+			OCACLReadRoles:          os.Getenv(fmt.Sprintf("ROOM_%d_OC_ACL_READ_ROLES", i)),
+			OCACLWriteRoles:         os.Getenv(fmt.Sprintf("ROOM_%d_OC_ACL_WRITE_ROLES", i)),
+			AppendDate:              strings.EqualFold(os.Getenv(fmt.Sprintf("ROOM_%d_APPEND_DATE", i)), "true"),
+		})
 	}
-	return parts
-}
-
-func buildRooms(ids, names []string) ([]Room, error) {
-	if len(ids) != len(names) {
-		return nil, fmt.Errorf(
-			"BBB_MEETING_ID has %d entries but BBB_MEETING_NAME has %d; counts must match",
-			len(ids), len(names),
-		)
-	}
-	rooms := make([]Room, len(ids))
-	for i, id := range ids {
-		rooms[i] = Room{ID: id, Name: names[i]}
+	if len(rooms) == 0 {
+		return nil, fmt.Errorf("no rooms configured: set at least ROOM_1_ID and ROOM_1_NAME")
 	}
 	return rooms, nil
 }
@@ -521,10 +522,7 @@ func findRoom(rooms []Room, id string) Room {
 }
 
 func loadConfig() (Config, error) {
-	ids := splitTrimmed(getEnvDefault("BBB_MEETING_ID", "opencast-meet"))
-	names := splitTrimmed(getEnvDefault("BBB_MEETING_NAME", "Opencast Meeting"))
-
-	rooms, err := buildRooms(ids, names)
+	rooms, err := loadRooms()
 	if err != nil {
 		return Config{}, err
 	}
@@ -534,24 +532,13 @@ func loadConfig() (Config, error) {
 		BBBSecret: os.Getenv("BBB_SERVER_SECRET"),
 
 		Rooms:       rooms,
-		MuteOnStart:             os.Getenv("BBB_MUTE_ON_START"),
-		Record:                  os.Getenv("BBB_RECORD"),
-		AutoStartRecording:      os.Getenv("BBB_AUTO_START_RECORDING"),
-		AllowStartStopRecording: os.Getenv("BBB_ALLOW_START_STOP_RECORDING"),
-		LoginURL:                os.Getenv("BBB_LOGIN_URL"),
-		LogoutURL:               os.Getenv("BBB_LOGOUT_URL"),
-		WelcomeMessage:          os.Getenv("BBB_WELCOME_MESSAGE"),
-		PreUploadedPresentation: os.Getenv("BBB_PRE_UPLOADED_PRESENTATION"),
+		MuteOnStart: os.Getenv("BBB_MUTE_ON_START"),
+		LoginURL:    os.Getenv("BBB_LOGIN_URL"),
+		LogoutURL:   os.Getenv("BBB_LOGOUT_URL"),
 
 		UserPassword:      os.Getenv("APP_USER_PASSWORD"),
 		ModeratorPassword: os.Getenv("APP_MODERATOR_PASSWORD"),
 		ListenAddr:        getEnvDefault("APP_LISTEN_ADDR", "127.0.0.1:8080"),
-
-		OCSeriesID:      os.Getenv("OC_SERIES_ID"),
-		OCDCCreator:     os.Getenv("OC_DC_CREATOR"),
-		OCAddWebcams:    os.Getenv("OC_ADD_WEBCAMS"),
-		OCACLReadRoles:  os.Getenv("OC_ACL_READ_ROLES"),
-		OCACLWriteRoles: os.Getenv("OC_ACL_WRITE_ROLES"),
 
 		EnableRealIP: strings.EqualFold(os.Getenv("ENABLE_REAL_IP"), "true"),
 
