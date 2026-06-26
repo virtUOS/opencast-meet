@@ -20,40 +20,59 @@ started.
 
 ### Required
 
-| Variable | Description |
-| --- | --- |
-| `BBB_SERVER_URL` | BigBlueButton server base URL, e.g. `https://bbb.example.com/bigbluebutton/` |
-| `BBB_SERVER_SECRET` | BBB shared API secret |
-| `APP_USER_PASSWORD` | Password granting viewer access |
-| `APP_MODERATOR_PASSWORD` | Password granting moderator access |
+| Variable                 | Description
+| ------------------------ | ----------------------
+| `BBB_SERVER_URL`         | BigBlueButton server base URL, e.g. `https://bbb.example.com/bigbluebutton/`
+| `BBB_SERVER_SECRET`      | BBB shared API secret
+| `APP_USER_PASSWORD`      | Password granting viewer access
+| `APP_MODERATOR_PASSWORD` | Password granting moderator access
 
-### Meeting
+### Rooms
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `BBB_MEETING_ID` | `opencast-meet` | Stable room identifier. Use a comma-separated list for multiple rooms (e.g. `room-a,room-b`). |
-| `BBB_MEETING_NAME` | `Opencast Meeting` | Room display name. Use a comma-separated list matching `BBB_MEETING_ID` (e.g. `Room A,Room B`). Supports `{{DATE}}` placeholder. When multiple rooms are configured a dropdown appears in the login form. |
-| `BBB_MUTE_ON_START` | | Mute participants on join |
-| `BBB_RECORD` | | Enable recording |
-| `BBB_AUTO_START_RECORDING` | | Start recording immediately |
-| `BBB_ALLOW_START_STOP_RECORDING` | | Let participants control recording |
-| `BBB_LOGIN_URL` | | Redirect URL on login |
-| `BBB_LOGOUT_URL` | | Redirect URL after leaving the meeting |
-| `BBB_WELCOME_MESSAGE` | | Message shown inside the meeting |
-| `BBB_PRE_UPLOADED_PRESENTATION` | | URL of a pre-loaded presentation |
-| `APP_LISTEN_ADDR` | `127.0.0.1:8080` | HTTP listen address |
-| `METRICS_USERNAME` | | Username for `/metrics` Basic Auth (must be paired with `METRICS_PASSWORD`) |
-| `METRICS_PASSWORD` | | Password for `/metrics` Basic Auth (must be paired with `METRICS_USERNAME`) |
+Rooms are defined with indexed `ROOM_N_*` variables starting at `N = 1`. At
+least `ROOM_1_ID` and `ROOM_1_NAME` must be set; the server fails to start
+otherwise. When more than one room is configured, a dropdown appears on the
+login page.
 
-### Opencast Integration
+| Variable                            | Default | Description
+| ----------------------------------- | ------- | ---------------------
+| `ROOM_N_ID`                         | —       | Stable BBB room identifier (required)
+| `ROOM_N_NAME`                       | —       | Room display name shown in the login form (required)
+| `ROOM_N_APPEND_DATE`                | `false` | Append today's date to the BBB room name at meeting-create time
+| `ROOM_N_RECORD`                     |         | Enable recording
+| `ROOM_N_AUTO_START_RECORDING`       |         | Start recording immediately
+| `ROOM_N_ALLOW_START_STOP_RECORDING` |         | Let participants control recording
+| `ROOM_N_WELCOME_MESSAGE`            |         | Message shown inside the meeting
+| `ROOM_N_PRE_UPLOADED_PRESENTATION`  |         | URL of a pre-loaded presentation
 
-| Variable | Description |
-| --- | --- |
-| `OC_SERIES_ID` | UUID of the target Opencast series |
-| `OC_DC_CREATOR` | Presenter name for Opencast metadata |
-| `OC_ADD_WEBCAMS` | Include webcam streams in the recording (`true`/`false`) |
-| `OC_ACL_READ_ROLES` | Comma-separated roles with read access |
-| `OC_ACL_WRITE_ROLES` | Comma-separated roles with write access |
+#### Opencast Integration (per room)
+
+| Variable                    | Description
+| --------------------------- | -----------------------------
+| `ROOM_N_OC_SERIES`          | UUID of the target Opencast series
+| `ROOM_N_OC_DC_CREATOR`      | Presenter name for Opencast metadata
+| `ROOM_N_OC_ADD_WEBCAMS`     | Include webcam streams in the recording (`true`/`false`)
+| `ROOM_N_OC_ACL_READ_ROLES`  | Comma-separated roles with read access
+| `ROOM_N_OC_ACL_WRITE_ROLES` | Comma-separated roles with write access
+
+### Global BBB Settings
+
+These settings apply to all rooms.
+
+| Variable            | Description
+| ------------------- | -------------------
+| `BBB_MUTE_ON_START` | Mute participants on join
+| `BBB_LOGIN_URL`     | Redirect URL on login
+| `BBB_LOGOUT_URL`    | Redirect URL after leaving the meeting
+
+### Server
+
+| Variable           | Default          | Description
+| ------------------ | ---------------- | -------------------
+| `APP_LISTEN_ADDR`  | `127.0.0.1:8080` | HTTP listen address
+| `ENABLE_REAL_IP`   | `false`          | Extract client IP from `X-Forwarded-For` / `X-Real-IP` headers; enable when running behind a trusted reverse proxy
+| `METRICS_USERNAME` |                  | Username for `/metrics` Basic Auth (must be paired with `METRICS_PASSWORD`)
+| `METRICS_PASSWORD` |                  | Password for `/metrics` Basic Auth (must be paired with `METRICS_USERNAME`)
 
 ## Running
 
