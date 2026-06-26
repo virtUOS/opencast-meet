@@ -34,16 +34,14 @@ least `ROOM_1_ID` and `ROOM_1_NAME` must be set; the server fails to start
 otherwise. When more than one room is configured, a dropdown appears on the
 login page.
 
-| Variable                            | Default | Description
-| ----------------------------------- | ------- | ---------------------
-| `ROOM_N_ID`                         | —       | Stable BBB room identifier (required)
-| `ROOM_N_NAME`                       | —       | Room display name shown in the login form (required)
-| `ROOM_N_APPEND_DATE`                | `false` | Append today's date to the BBB room name at meeting-create time
-| `ROOM_N_RECORD`                     |         | Enable recording
-| `ROOM_N_AUTO_START_RECORDING`       |         | Start recording immediately
-| `ROOM_N_ALLOW_START_STOP_RECORDING` |         | Let participants control recording
-| `ROOM_N_WELCOME_MESSAGE`            |         | Message shown inside the meeting
-| `ROOM_N_PRE_UPLOADED_PRESENTATION`  |         | URL of a pre-loaded presentation
+| Variable                           | Default | Description
+| ---------------------------------- | ------- | ---------------------
+| `ROOM_N_ID`                        | —       | Stable BBB room identifier (required)
+| `ROOM_N_NAME`                      | —       | Room display name shown in the login form (required)
+| `ROOM_N_APPEND_DATE`               | `false` | Append today's date to the BBB room name at meeting-create time
+| `ROOM_N_RECORD`                    | `false` | Enable recording; also controls whether participants can start/stop recording
+| `ROOM_N_WELCOME_MESSAGE`           |         | Message shown inside the meeting
+| `ROOM_N_PRE_UPLOADED_PRESENTATION` |         | URL of a pre-loaded presentation
 
 #### Opencast Integration (per room)
 
@@ -54,14 +52,6 @@ login page.
 | `ROOM_N_OC_ADD_WEBCAMS`     | Include webcam streams in the recording (`true`/`false`)
 | `ROOM_N_OC_ACL_READ_ROLES`  | Comma-separated roles with read access
 | `ROOM_N_OC_ACL_WRITE_ROLES` | Comma-separated roles with write access
-
-### Global BBB Settings
-
-These settings apply to all rooms.
-
-| Variable            | Description
-| ------------------- | -------------------
-| `BBB_MUTE_ON_START` | Mute participants on join
 
 ### Server
 
