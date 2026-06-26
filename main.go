@@ -50,9 +50,7 @@ type CreateResponse struct {
 type Room struct {
 	ID                      string
 	Name                    string
-	Record                  string
-	AutoStartRecording      string
-	AllowStartStopRecording string
+	Record string
 	WelcomeMessage          string
 	PreUploadedPresentation string
 	OCSeriesID              string
@@ -69,7 +67,6 @@ type Config struct {
 	BBBSecret string
 
 	Rooms       []Room
-	MuteOnStart string
 	FrontendURL string
 
 	UserPassword      string
@@ -273,17 +270,11 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 		name += " | " + time.Now().Format("2006-01-02")
 	}
 	params.Add("name", name)
-	if cfg.MuteOnStart != "" {
-		params.Add("muteOnStart", cfg.MuteOnStart)
-	}
+	params.Add("muteOnStart", "true")
+	params.Add("autoStartRecording", "false")
 	if room.Record != "" {
 		params.Add("record", room.Record)
-	}
-	if room.AutoStartRecording != "" {
-		params.Add("autoStartRecording", room.AutoStartRecording)
-	}
-	if room.AllowStartStopRecording != "" {
-		params.Add("allowStartStopRecording", room.AllowStartStopRecording)
+		params.Add("allowStartStopRecording", room.Record)
 	}
 	if cfg.FrontendURL != "" {
 		params.Add("loginURL", cfg.FrontendURL)
@@ -490,9 +481,7 @@ func loadRooms() ([]Room, error) {
 		rooms = append(rooms, Room{
 			ID:                      id,
 			Name:                    os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i)),
-			Record:                  os.Getenv(fmt.Sprintf("ROOM_%d_RECORD", i)),
-			AutoStartRecording:      os.Getenv(fmt.Sprintf("ROOM_%d_AUTO_START_RECORDING", i)),
-			AllowStartStopRecording: os.Getenv(fmt.Sprintf("ROOM_%d_ALLOW_START_STOP_RECORDING", i)),
+			Record: getEnvDefault(fmt.Sprintf("ROOM_%d_RECORD", i), "false"),
 			WelcomeMessage:          os.Getenv(fmt.Sprintf("ROOM_%d_WELCOME_MESSAGE", i)),
 			PreUploadedPresentation: os.Getenv(fmt.Sprintf("ROOM_%d_PRE_UPLOADED_PRESENTATION", i)),
 			OCSeriesID:              os.Getenv(fmt.Sprintf("ROOM_%d_OC_SERIES", i)),
@@ -529,7 +518,6 @@ func loadConfig() (Config, error) {
 		BBBSecret: os.Getenv("BBB_SERVER_SECRET"),
 
 		Rooms:       rooms,
-		MuteOnStart: os.Getenv("BBB_MUTE_ON_START"),
 		FrontendURL: os.Getenv("APP_FRONTEND_URL"),
 
 		UserPassword:      os.Getenv("APP_USER_PASSWORD"),
