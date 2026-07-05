@@ -88,31 +88,31 @@ type server struct {
 
 var (
 	metricJoinAttempts = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_join_attempts_total",
+		Name: "opencast_meet_join_attempts_total",
 		Help: "Total join form submissions",
 	})
 	metricJoinInvalidPw = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_join_invalid_password_total",
+		Name: "opencast_meet_join_invalid_password_total",
 		Help: "Join attempts with invalid password",
 	})
 	metricJoinModerator = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_join_moderator_total",
+		Name: "opencast_meet_join_moderator_total",
 		Help: "Logins with moderator credential",
 	})
 	metricJoinViewer = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_join_viewer_total",
+		Name: "opencast_meet_join_viewer_total",
 		Help: "Logins with viewer credential",
 	})
 	metricBBBErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_bbb_errors_total",
+		Name: "opencast_meet_bbb_errors_total",
 		Help: "Failures from BigBlueButton API calls",
 	})
 	metricBBBJoinURLErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_bbb_join_url_errors_total",
+		Name: "opencast_meet_bbb_join_url_errors_total",
 		Help: "Failures building BBB join URL",
 	})
 	metricJoinRateLimited = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_join_rate_limited_total",
+		Name: "opencast_meet_join_rate_limited_total",
 		Help: "Join attempts rejected because the client IP was rate limited",
 	})
 )
@@ -611,7 +611,7 @@ func main() {
 	}
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
-			Name: "opencast_ratelimit_tracked_ips",
+			Name: "opencast_meet_ratelimit_tracked_ips",
 			Help: "IPs currently tracked by the rate limiter",
 		},
 		func() float64 { return float64(srv.limiter.activeIPs()) },
