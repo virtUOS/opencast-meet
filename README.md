@@ -67,7 +67,9 @@ login page.
 
 Login attempts with a wrong password are rate limited per client IP. Behind a
 reverse proxy all clients share the proxy's address unless `ENABLE_REAL_IP` is
-set, in which case the first entry of `X-Forwarded-For` is used instead.
+set, in which case the first entry of `X-Forwarded-For` is used instead. With
+the flag off, one client's failed attempts delay logins for everyone, so enable
+it whenever a proxy is in front of the application.
 
 Only enable this when the outermost proxy replaces any client-supplied
 `X-Forwarded-For` header, otherwise clients can spoof their IP and bypass the
