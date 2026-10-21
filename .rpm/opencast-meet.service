@@ -11,5 +11,18 @@ Group=opencast-meet
 ExecStart=/usr/bin/opencast-meet --env-path /etc/opencast-meet.conf
 Restart=on-failure
 
+# Hardening: the service only needs network access and reads its config once.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictRealtime=true
+LockPersonality=true
+
 [Install]
 WantedBy=multi-user.target
