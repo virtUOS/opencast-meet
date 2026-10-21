@@ -20,7 +20,7 @@
       {{if gt (len .Rooms) 1}}
       <label for="room">Meeting Room</label>
       <select id="room" name="room">
-        {{range .Rooms}}<option value="{{.ID}}" data-record="{{.Record}}"{{if eq .ID $.SelectedRoom}} selected{{end}}>{{.Name}}{{if eq .Record "true"}} (rec){{end}}</option>
+        {{range .Rooms}}<option value="{{.ID}}" data-record="{{.Record}}"{{if eq .ID $.SelectedRoom}} selected{{end}}>{{.Name}}{{if .Record}} (rec){{end}}</option>
         {{end}}
       </select>
       {{end}}
