@@ -51,7 +51,7 @@ type CreateResponse struct {
 type Room struct {
 	ID                      string
 	Name                    string
-	Record                  string
+	Record                  bool
 	WelcomeMessage          string
 	PreUploadedPresentation string
 	OCSeriesID              string
@@ -276,10 +276,8 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 	params.Add("name", name)
 	params.Add("muteOnStart", "true")
 	params.Add("autoStartRecording", "false")
-	if room.Record != "" {
-		params.Add("record", room.Record)
-		params.Add("allowStartStopRecording", room.Record)
-	}
+	params.Add("record", strconv.FormatBool(room.Record))
+	params.Add("allowStartStopRecording", strconv.FormatBool(room.Record))
 	if cfg.FrontendURL != "" {
 		params.Add("loginURL", cfg.FrontendURL)
 		params.Add("logoutURL", cfg.FrontendURL)
@@ -388,7 +386,7 @@ func (s *server) indexData(errCode, name, selectedRoom string) indexTemplateData
 		Name:                   name,
 		Rooms:                  s.config.Rooms,
 		SelectedRoom:           selectedRoom,
-		SelectedRoomRecordable: room.Record == "true",
+		SelectedRoomRecordable: room.Record,
 	}
 }
 
@@ -455,7 +453,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.limiter.reset(ip)
 
-	if room.Record == "true" && r.FormValue("recording_consent") != "on" {
+	if room.Record && r.FormValue("recording_consent") != "on" {
 		renderError("consent")
 		return
 	}
@@ -523,7 +521,7 @@ func loadRooms() ([]Room, error) {
 		rooms = append(rooms, Room{
 			ID:                      id,
 			Name:                    os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i)),
-			Record:                  getEnvDefault(fmt.Sprintf("ROOM_%d_RECORD", i), "false"),
+			Record:                  strings.EqualFold(os.Getenv(fmt.Sprintf("ROOM_%d_RECORD", i)), "true"),
 			WelcomeMessage:          os.Getenv(fmt.Sprintf("ROOM_%d_WELCOME_MESSAGE", i)),
 			PreUploadedPresentation: os.Getenv(fmt.Sprintf("ROOM_%d_PRE_UPLOADED_PRESENTATION", i)),
 			OCSeriesID:              os.Getenv(fmt.Sprintf("ROOM_%d_OC_SERIES", i)),
