@@ -422,11 +422,11 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var role string
-	switch password {
-	case s.config.ModeratorPassword:
+	switch {
+	case subtle.ConstantTimeCompare([]byte(password), []byte(s.config.ModeratorPassword)) == 1:
 		role = "MODERATOR"
 		metricJoinModerator.Inc()
-	case s.config.UserPassword:
+	case subtle.ConstantTimeCompare([]byte(password), []byte(s.config.UserPassword)) == 1:
 		role = "VIEWER"
 		metricJoinViewer.Inc()
 	default:
