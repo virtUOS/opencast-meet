@@ -64,7 +64,7 @@ type Room struct {
 
 // Config holds all runtime configuration loaded from environment variables.
 type Config struct {
-	BBBURL    string
+	BBBURL    *url.URL
 	BBBSecret string
 
 	Rooms       []Room
@@ -108,10 +108,6 @@ var (
 		Name: "opencast_meet_bbb_errors_total",
 		Help: "Failures from BigBlueButton API calls",
 	})
-	metricBBBJoinURLErrors = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "opencast_meet_bbb_join_url_errors_total",
-		Help: "Failures building BBB join URL",
-	})
 	metricJoinRateLimited = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "opencast_meet_join_rate_limited_total",
 		Help: "Join attempts rejected because the client IP was rate limited",
@@ -125,7 +121,6 @@ func init() {
 		metricJoinModerator,
 		metricJoinViewer,
 		metricBBBErrors,
-		metricBBBJoinURLErrors,
 		metricJoinRateLimited,
 	)
 }
@@ -241,13 +236,8 @@ func (s *server) clientIP(r *http.Request) string {
 }
 
 // getBBBVersion fetches the BigBlueButton server version.
-func getBBBVersion(baseURL string, client *http.Client) (*VersionResponse, error) {
-	apiURL, err := url.JoinPath(baseURL, "api")
-	if err != nil {
-		return nil, fmt.Errorf("failed to build API URL: %w", err)
-	}
-
-	resp, err := client.Get(apiURL)
+func getBBBVersion(baseURL *url.URL, client *http.Client) (*VersionResponse, error) {
+	resp, err := client.Get(baseURL.JoinPath("api").String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to make request: %w", err)
 	}
@@ -311,11 +301,7 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 	checksum := calculateChecksum("create", params.Encode(), cfg.BBBSecret)
 	params.Add("checksum", checksum)
 
-	serverURL, err := url.Parse(cfg.BBBURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse BBB URL: %w", err)
-	}
-	apiURL := serverURL.JoinPath("api", "create")
+	apiURL := cfg.BBBURL.JoinPath("api", "create")
 	apiURL.RawQuery = params.Encode()
 
 	resp, err := client.Get(apiURL.String())
@@ -340,7 +326,7 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 // generateJoinURL builds a BBB join URL for the given participant name and role.
 // createTime binds the link to the current meeting instance so it stops working
 // once that meeting has ended.
-func generateJoinURL(baseURL, meetingID, createTime, fullName, role, secret string) (string, error) {
+func generateJoinURL(baseURL *url.URL, meetingID, createTime, fullName, role, secret string) string {
 	params := url.Values{}
 	params.Add("fullName", fullName)
 	params.Add("meetingID", meetingID)
@@ -352,14 +338,9 @@ func generateJoinURL(baseURL, meetingID, createTime, fullName, role, secret stri
 	checksum := calculateChecksum("join", params.Encode(), secret)
 	params.Add("checksum", checksum)
 
-	serverURL, err := url.Parse(baseURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse BBB URL: %w", err)
-	}
-	joinURL := serverURL.JoinPath("api", "join")
+	joinURL := baseURL.JoinPath("api", "join")
 	joinURL.RawQuery = params.Encode()
-
-	return joinURL.String(), nil
+	return joinURL.String()
 }
 
 // errorMessages maps the short error codes used in the ?error= query parameter
@@ -372,7 +353,6 @@ var errorMessages = map[string]string{
 	"ratelimit": "Too many attempts. Please wait a moment and try again.",
 	"bbb":       "Could not connect to the meeting server. Please try again later.",
 	"bbbfail":   "The meeting server returned an error. Please try again later.",
-	"joinurl":   "Could not generate a join link. Please try again later.",
 }
 
 type indexTemplateData struct {
@@ -481,14 +461,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	joinURL, err := generateJoinURL(s.config.BBBURL, createResp.MeetingID, createResp.CreateTime, name, role, s.config.BBBSecret)
-	if err != nil {
-		log.Printf("error generating join URL: %v", err)
-		metricBBBJoinURLErrors.Inc()
-		renderError("joinurl")
-		return
-	}
-
+	joinURL := generateJoinURL(s.config.BBBURL, createResp.MeetingID, createResp.CreateTime, name, role, s.config.BBBSecret)
 	http.Redirect(w, r, joinURL, http.StatusFound)
 }
 
@@ -522,14 +495,23 @@ func basicAuthHandler(username, password string, next http.Handler) http.Handler
 
 func loadRooms() ([]Room, error) {
 	var rooms []Room
+	seen := map[string]int{}
 	for i := 1; ; i++ {
 		id := os.Getenv(fmt.Sprintf("ROOM_%d_ID", i))
 		if id == "" {
 			break
 		}
+		if prev, dup := seen[id]; dup {
+			return nil, fmt.Errorf("ROOM_%d_ID duplicates ROOM_%d_ID (%q)", i, prev, id)
+		}
+		seen[id] = i
+		name := os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i))
+		if name == "" {
+			return nil, fmt.Errorf("ROOM_%d_NAME is not set", i)
+		}
 		rooms = append(rooms, Room{
 			ID:                      id,
-			Name:                    os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i)),
+			Name:                    name,
 			Record:                  strings.EqualFold(os.Getenv(fmt.Sprintf("ROOM_%d_RECORD", i)), "true"),
 			WelcomeMessage:          os.Getenv(fmt.Sprintf("ROOM_%d_WELCOME_MESSAGE", i)),
 			PreUploadedPresentation: os.Getenv(fmt.Sprintf("ROOM_%d_PRE_UPLOADED_PRESENTATION", i)),
@@ -562,8 +544,16 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	bbbURL, err := url.Parse(os.Getenv("BBB_SERVER_URL"))
+	if err != nil {
+		return Config{}, fmt.Errorf("BBB_SERVER_URL is invalid: %w", err)
+	}
+	if bbbURL.Scheme == "" || bbbURL.Host == "" {
+		return Config{}, fmt.Errorf("BBB_SERVER_URL must be an absolute URL, e.g. https://bbb.example.com/bigbluebutton/")
+	}
+
 	return Config{
-		BBBURL:    os.Getenv("BBB_SERVER_URL"),
+		BBBURL:    bbbURL,
 		BBBSecret: os.Getenv("BBB_SERVER_SECRET"),
 
 		Rooms:       rooms,
@@ -606,10 +596,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if cfg.BBBURL == "" {
-		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_URL is not set")
-		os.Exit(1)
-	}
 	if cfg.BBBSecret == "" {
 		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_SECRET is not set")
 		os.Exit(1)
