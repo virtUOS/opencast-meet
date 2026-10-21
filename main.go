@@ -635,8 +635,15 @@ func main() {
 	http.Handle("/metrics", metricsHandler)
 	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
+	httpServer := &http.Server{
+		Addr:              cfg.ListenAddr,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 	log.Printf("Listening on http://%s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
+	if err := httpServer.ListenAndServe(); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
