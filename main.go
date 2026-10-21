@@ -215,15 +215,18 @@ func (rl *rateLimiter) evictStale() {
 	}
 }
 
-// clientIP returns the client's IP address. When EnableRealIP is set it checks
-// trusted proxy headers before falling back to r.RemoteAddr.
+// clientIP returns the client's IP address. When EnableRealIP is set, the
+// first entry of X-Forwarded-For is used. This relies on the outermost reverse
+// proxy replacing any client-supplied X-Forwarded-For header (Caddy does so by
+// default; nginx needs proxy_set_header X-Forwarded-For $remote_addr or the
+// realip module). Invalid values fall back to the socket address.
 func (s *server) clientIP(r *http.Request) string {
 	if s.config.EnableRealIP {
-		if v := r.Header.Get("X-Real-IP"); v != "" {
-			return strings.TrimSpace(v)
-		}
 		if v := r.Header.Get("X-Forwarded-For"); v != "" {
-			return strings.TrimSpace(strings.SplitN(v, ",", 2)[0])
+			first := strings.TrimSpace(strings.SplitN(v, ",", 2)[0])
+			if ip := net.ParseIP(first); ip != nil {
+				return ip.String()
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
