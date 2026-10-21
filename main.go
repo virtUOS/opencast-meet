@@ -557,13 +557,13 @@ func getEnvDefault(key, fallback string) string {
 }
 
 func main() {
+	log.SetFlags(0) // systemd and container runtimes add their own timestamps
 	envPath := flag.String("env-path", "", "path to the environment file to load (default: .env in current directory)")
 	flag.Parse()
 
 	if *envPath != "" {
 		if err := godotenv.Load(*envPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading env file %s: %v\n", *envPath, err)
-			os.Exit(1)
+			log.Fatalf("Error loading env file %s: %v", *envPath, err)
 		}
 	} else {
 		_ = godotenv.Load()
@@ -571,21 +571,16 @@ func main() {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error: %v", err)
 	}
-
 	if cfg.BBBSecret == "" {
-		fmt.Fprintln(os.Stderr, "Error: BBB_SERVER_SECRET is not set")
-		os.Exit(1)
+		log.Fatal("Error: BBB_SERVER_SECRET is not set")
 	}
 	if cfg.UserPassword == "" || cfg.ModeratorPassword == "" {
-		fmt.Fprintln(os.Stderr, "Error: APP_USER_PASSWORD and APP_MODERATOR_PASSWORD must both be set")
-		os.Exit(1)
+		log.Fatal("Error: APP_USER_PASSWORD and APP_MODERATOR_PASSWORD must both be set")
 	}
 	if (cfg.MetricsUsername == "") != (cfg.MetricsPassword == "") {
-		fmt.Fprintln(os.Stderr, "Error: METRICS_USERNAME and METRICS_PASSWORD must both be set or both be empty")
-		os.Exit(1)
+		log.Fatal("Error: METRICS_USERNAME and METRICS_PASSWORD must both be set or both be empty")
 	}
 
 	httpClient := &http.Client{Timeout: 10 * time.Second}
@@ -593,20 +588,14 @@ func main() {
 	// Startup connection check — warn but don't abort if BBB is unreachable.
 	versionResp, err := getBBBVersion(cfg, httpClient)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not reach BBB server: %v\n", err)
+		log.Printf("Warning: could not reach BBB server: %v", err)
 	} else {
 		log.Printf("Connected to BigBlueButton %s", versionResp.BBBVersion)
 	}
 
-	tmplData, err := staticFiles.ReadFile("static/index.html")
+	tmpl, err := template.ParseFS(staticFiles, "static/index.html")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading template: %v\n", err)
-		os.Exit(1)
-	}
-	tmpl, err := template.New("index").Parse(string(tmplData))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing template: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error parsing template: %v", err)
 	}
 
 	srv := &server{
@@ -642,7 +631,6 @@ func main() {
 	}
 	log.Printf("Listening on http://%s", cfg.ListenAddr)
 	if err := httpServer.ListenAndServe(); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Server error: %v", err)
 	}
 }
