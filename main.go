@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"math"
 	"net"
@@ -136,14 +135,6 @@ type addrState struct {
 	blockedUntil time.Time
 }
 
-// calculateChecksum generates the SHA-256 checksum for BigBlueButton API calls.
-// Format: SHA256(callName + queryString + secret)
-func calculateChecksum(callName, queryString, secret string) string {
-	raw := callName + queryString + secret
-	hash := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(hash[:])
-}
-
 // maxNameLength caps the participant name passed to BBB.
 const maxNameLength = 100
 
@@ -235,24 +226,36 @@ func (s *server) clientIP(r *http.Request) string {
 	return host
 }
 
-// getBBBVersion fetches the BigBlueButton server version.
-func getBBBVersion(baseURL *url.URL, client *http.Client) (*VersionResponse, error) {
-	resp, err := client.Get(baseURL.JoinPath("api").String())
+// bbbURL builds a signed BigBlueButton API URL for the given call. The
+// checksum is SHA256(call + query + secret) as required by the BBB API.
+func bbbURL(cfg Config, call string, params url.Values) string {
+	sum := sha256.Sum256([]byte(call + params.Encode() + cfg.BBBSecret))
+	params.Set("checksum", hex.EncodeToString(sum[:]))
+	u := cfg.BBBURL.JoinPath("api", call)
+	u.RawQuery = params.Encode()
+	return u.String()
+}
+
+// bbbGet performs a GET request against apiURL and decodes the XML response
+// into out.
+func bbbGet(client *http.Client, apiURL string, out any) error {
+	resp, err := client.Get(apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
+		return fmt.Errorf("failed to make request: %w", err)
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+	if err := xml.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("failed to parse XML response: %w", err)
 	}
+	return nil
+}
 
+// getBBBVersion fetches the BigBlueButton server version.
+func getBBBVersion(cfg Config, client *http.Client) (*VersionResponse, error) {
 	var versionResp VersionResponse
-	if err := xml.Unmarshal(body, &versionResp); err != nil {
-		return nil, fmt.Errorf("failed to parse XML response: %w", err)
+	if err := bbbGet(client, cfg.BBBURL.JoinPath("api").String(), &versionResp); err != nil {
+		return nil, err
 	}
-
 	return &versionResp, nil
 }
 
@@ -298,35 +301,17 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 		params.Add("meta_opencast-acl-write-roles", room.OCACLWriteRoles)
 	}
 
-	checksum := calculateChecksum("create", params.Encode(), cfg.BBBSecret)
-	params.Add("checksum", checksum)
-
-	apiURL := cfg.BBBURL.JoinPath("api", "create")
-	apiURL.RawQuery = params.Encode()
-
-	resp, err := client.Get(apiURL.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
 	var createResp CreateResponse
-	if err := xml.Unmarshal(body, &createResp); err != nil {
-		return nil, fmt.Errorf("failed to parse XML response: %w", err)
+	if err := bbbGet(client, bbbURL(cfg, "create", params), &createResp); err != nil {
+		return nil, err
 	}
-
 	return &createResp, nil
 }
 
 // generateJoinURL builds a BBB join URL for the given participant name and role.
 // createTime binds the link to the current meeting instance so it stops working
 // once that meeting has ended.
-func generateJoinURL(baseURL *url.URL, meetingID, createTime, fullName, role, secret string) string {
+func generateJoinURL(cfg Config, meetingID, createTime, fullName, role string) string {
 	params := url.Values{}
 	params.Add("fullName", fullName)
 	params.Add("meetingID", meetingID)
@@ -334,13 +319,7 @@ func generateJoinURL(baseURL *url.URL, meetingID, createTime, fullName, role, se
 	if createTime != "" {
 		params.Add("createTime", createTime)
 	}
-
-	checksum := calculateChecksum("join", params.Encode(), secret)
-	params.Add("checksum", checksum)
-
-	joinURL := baseURL.JoinPath("api", "join")
-	joinURL.RawQuery = params.Encode()
-	return joinURL.String()
+	return bbbURL(cfg, "join", params)
 }
 
 // errorMessages maps the short error codes used in the ?error= query parameter
@@ -461,7 +440,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	joinURL := generateJoinURL(s.config.BBBURL, createResp.MeetingID, createResp.CreateTime, name, role, s.config.BBBSecret)
+	joinURL := generateJoinURL(s.config, createResp.MeetingID, createResp.CreateTime, name, role)
 	http.Redirect(w, r, joinURL, http.StatusFound)
 }
 
@@ -612,7 +591,7 @@ func main() {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 
 	// Startup connection check — warn but don't abort if BBB is unreachable.
-	versionResp, err := getBBBVersion(cfg.BBBURL, httpClient)
+	versionResp, err := getBBBVersion(cfg, httpClient)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not reach BBB server: %v\n", err)
 	} else {
