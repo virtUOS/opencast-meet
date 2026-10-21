@@ -44,6 +44,7 @@ type CreateResponse struct {
 	Message    string   `xml:"message"`
 	MessageKey string   `xml:"messageKey"`
 	MeetingID  string   `xml:"meetingID"`
+	CreateTime string   `xml:"createTime"`
 }
 
 // Room is a single BBB meeting room entry.
@@ -336,11 +337,16 @@ func createMeeting(cfg Config, room Room, client *http.Client) (*CreateResponse,
 }
 
 // generateJoinURL builds a BBB join URL for the given participant name and role.
-func generateJoinURL(baseURL, meetingID, fullName, role, secret string) (string, error) {
+// createTime binds the link to the current meeting instance so it stops working
+// once that meeting has ended.
+func generateJoinURL(baseURL, meetingID, createTime, fullName, role, secret string) (string, error) {
 	params := url.Values{}
 	params.Add("fullName", fullName)
 	params.Add("meetingID", meetingID)
 	params.Add("role", role)
+	if createTime != "" {
+		params.Add("createTime", createTime)
+	}
 
 	checksum := calculateChecksum("join", params.Encode(), secret)
 	params.Add("checksum", checksum)
@@ -456,7 +462,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	joinURL, err := generateJoinURL(s.config.BBBURL, createResp.MeetingID, name, role, s.config.BBBSecret)
+	joinURL, err := generateJoinURL(s.config.BBBURL, createResp.MeetingID, createResp.CreateTime, name, role, s.config.BBBSecret)
 	if err != nil {
 		log.Printf("error generating join URL: %v", err)
 		metricBBBJoinURLErrors.Inc()
