@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-//go:embed static/index.html static/img static/js
+//go:embed static/index.html static/css static/img static/js
 var staticFiles embed.FS
 
 // ///
@@ -485,6 +485,20 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, joinURL, http.StatusFound)
 }
 
+// securityHeaders sets conservative browser security headers on every
+// response. The page only loads same-origin resources; the data: image source
+// is for the inline SVG dropdown arrow in the stylesheet.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func basicAuthHandler(username, password string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
@@ -648,6 +662,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
+		Handler:           securityHeaders(http.DefaultServeMux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

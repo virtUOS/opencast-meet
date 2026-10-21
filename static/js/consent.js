@@ -6,7 +6,7 @@
     var wrap = document.getElementById('consent-wrap');
     var cb = document.getElementById('recording_consent');
     var rec = opt && opt.getAttribute('data-record') === 'true';
-    wrap.style.display = rec ? '' : 'none';
+    wrap.hidden = !rec;
     cb.required = rec;
     if (!rec) cb.checked = false;
   }
