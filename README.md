@@ -59,9 +59,27 @@ login page.
 | ------------------ | ---------------- | -------------------
 | `APP_LISTEN_ADDR`  | `127.0.0.1:8080` | HTTP listen address
 | `APP_FRONTEND_URL` |                  | Used as BBB  redirect URL
-| `ENABLE_REAL_IP`   | `false`          | Extract client IP from `X-Forwarded-For` / `X-Real-IP` headers; enable when running behind a trusted reverse proxy
+| `ENABLE_REAL_IP`   | `false`          | Use the first `X-Forwarded-For` entry as client IP for rate limiting; see [Reverse proxy](#reverse-proxy)
 | `METRICS_USERNAME` |                  | Username for `/metrics` Basic Auth (must be paired with `METRICS_PASSWORD`)
 | `METRICS_PASSWORD` |                  | Password for `/metrics` Basic Auth (must be paired with `METRICS_USERNAME`)
+
+### Reverse proxy
+
+Login attempts with a wrong password are rate limited per client IP. Behind a
+reverse proxy all clients share the proxy's address unless `ENABLE_REAL_IP` is
+set, in which case the first entry of `X-Forwarded-For` is used instead.
+
+Only enable this when the outermost proxy replaces any client-supplied
+`X-Forwarded-For` header, otherwise clients can spoof their IP and bypass the
+rate limit:
+
+- **Caddy** does this by default (unless the client is listed in
+  `trusted_proxies`).
+- **nginx** with `proxy_add_x_forwarded_for` appends to the client's header.
+  Use `proxy_set_header X-Forwarded-For $remote_addr;` on the outermost proxy,
+  or the `realip` module with `set_real_ip_from`.
+
+Chained proxies are fine as long as the outermost one follows this rule.
 
 ## Running
 
