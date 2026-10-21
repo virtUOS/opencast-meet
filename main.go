@@ -51,7 +51,7 @@ type CreateResponse struct {
 type Room struct {
 	ID                      string
 	Name                    string
-	Record string
+	Record                  string
 	WelcomeMessage          string
 	PreUploadedPresentation string
 	OCSeriesID              string
@@ -361,6 +361,18 @@ func generateJoinURL(baseURL, meetingID, createTime, fullName, role, secret stri
 	return joinURL.String(), nil
 }
 
+// errorMessages maps the short error codes used in the ?error= query parameter
+// to the text shown on the login page. Unknown codes render no message, so the
+// page cannot be used to display arbitrary attacker-supplied text.
+var errorMessages = map[string]string{
+	"password":  "Invalid password. Please try again.",
+	"consent":   "You must consent to the recording to enter this room.",
+	"ratelimit": "Too many attempts. Please wait a moment and try again.",
+	"bbb":       "Could not connect to the meeting server. Please try again later.",
+	"bbbfail":   "The meeting server returned an error. Please try again later.",
+	"joinurl":   "Could not generate a join link. Please try again later.",
+}
+
 type indexTemplateData struct {
 	Error                  string
 	Name                   string
@@ -369,10 +381,10 @@ type indexTemplateData struct {
 	SelectedRoomRecordable bool
 }
 
-func (s *server) indexData(errMsg, name, selectedRoom string) indexTemplateData {
+func (s *server) indexData(errCode, name, selectedRoom string) indexTemplateData {
 	room := findRoom(s.config.Rooms, selectedRoom)
 	return indexTemplateData{
-		Error:                  errMsg,
+		Error:                  errorMessages[errCode],
 		Name:                   name,
 		Rooms:                  s.config.Rooms,
 		SelectedRoom:           selectedRoom,
@@ -407,8 +419,8 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 
 	room := findRoom(s.config.Rooms, roomID)
 
-	renderError := func(msg string) {
-		redirectURL := "/?error=" + url.QueryEscape(msg)
+	renderError := func(code string) {
+		redirectURL := "/?error=" + code
 		if name != "" {
 			redirectURL += "&name=" + url.QueryEscape(name)
 		}
@@ -423,7 +435,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(d.Seconds()))))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_ = s.tmpl.Execute(w, s.indexData("Too many attempts. Please wait a moment and try again.", name, room.ID))
+		_ = s.tmpl.Execute(w, s.indexData("ratelimit", name, room.ID))
 		return
 	}
 
@@ -438,13 +450,13 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.limiter.recordFailure(ip)
 		metricJoinInvalidPw.Inc()
-		renderError("Invalid password. Please try again.")
+		renderError("password")
 		return
 	}
 	s.limiter.reset(ip)
 
 	if room.Record == "true" && r.FormValue("recording_consent") != "on" {
-		renderError("You must consent to the recording to enter this room.")
+		renderError("consent")
 		return
 	}
 
@@ -452,13 +464,13 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("error creating meeting: %v", err)
 		metricBBBErrors.Inc()
-		renderError("Could not connect to the meeting server. Please try again later.")
+		renderError("bbb")
 		return
 	}
 	if createResp.ReturnCode != "SUCCESS" {
 		log.Printf("BBB create returned non-success: %s / %s", createResp.MessageKey, createResp.Message)
 		metricBBBErrors.Inc()
-		renderError("The meeting server returned an error. Please try again later.")
+		renderError("bbbfail")
 		return
 	}
 
@@ -466,13 +478,12 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("error generating join URL: %v", err)
 		metricBBBJoinURLErrors.Inc()
-		renderError("Could not generate a join link. Please try again later.")
+		renderError("joinurl")
 		return
 	}
 
 	http.Redirect(w, r, joinURL, http.StatusFound)
 }
-
 
 func basicAuthHandler(username, password string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -498,7 +509,7 @@ func loadRooms() ([]Room, error) {
 		rooms = append(rooms, Room{
 			ID:                      id,
 			Name:                    os.Getenv(fmt.Sprintf("ROOM_%d_NAME", i)),
-			Record: getEnvDefault(fmt.Sprintf("ROOM_%d_RECORD", i), "false"),
+			Record:                  getEnvDefault(fmt.Sprintf("ROOM_%d_RECORD", i), "false"),
 			WelcomeMessage:          os.Getenv(fmt.Sprintf("ROOM_%d_WELCOME_MESSAGE", i)),
 			PreUploadedPresentation: os.Getenv(fmt.Sprintf("ROOM_%d_PRE_UPLOADED_PRESENTATION", i)),
 			OCSeriesID:              os.Getenv(fmt.Sprintf("ROOM_%d_OC_SERIES", i)),
