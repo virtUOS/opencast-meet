@@ -149,6 +149,9 @@ func calculateChecksum(callName, queryString, secret string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// maxNameLength caps the participant name passed to BBB.
+const maxNameLength = 100
+
 const (
 	rlResetAfter = 10 * time.Minute
 	rlDelayBase  = 2 * time.Second
@@ -363,6 +366,7 @@ func generateJoinURL(baseURL, meetingID, createTime, fullName, role, secret stri
 // to the text shown on the login page. Unknown codes render no message, so the
 // page cannot be used to display arbitrary attacker-supplied text.
 var errorMessages = map[string]string{
+	"name":      "Please enter your name.",
 	"password":  "Invalid password. Please try again.",
 	"consent":   "You must consent to the recording to enter this room.",
 	"ratelimit": "Too many attempts. Please wait a moment and try again.",
@@ -410,7 +414,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	metricJoinAttempts.Inc()
 
-	name := r.FormValue("name")
+	name := strings.TrimSpace(r.FormValue("name"))
 	password := r.FormValue("password")
 	roomID := r.FormValue("room")
 	ip := s.clientIP(r)
@@ -434,6 +438,11 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = s.tmpl.Execute(w, s.indexData("ratelimit", name, room.ID))
+		return
+	}
+
+	if name == "" || len(name) > maxNameLength {
+		renderError("name")
 		return
 	}
 
