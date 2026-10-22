@@ -14,7 +14,7 @@ Source2:       .env.example
 URL:           https://github.com/virtuos/%{name}
 BuildRoot:     %{_tmppath}/%{name}-root
 
-BuildRequires:     systemd
+BuildRequires:     systemd-rpm-macros
 Requires(post):    systemd
 Requires(preun):   systemd
 Requires(postun):  systemd
