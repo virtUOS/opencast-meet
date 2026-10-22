@@ -2,7 +2,7 @@
 
 set -eux
 
-dnf install -y rpmdevtools
+dnf install -y rpmdevtools systemd-rpm-macros
 rpmdev-setuptree
 
 echo "%appversion ${2}" >>~/.rpmmacros
