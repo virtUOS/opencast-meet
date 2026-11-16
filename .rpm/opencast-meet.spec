@@ -14,12 +14,9 @@ Source2:       .env.example
 Source3:       LICENSE
 Source4:       README.md
 URL:           https://github.com/virtuos/%{name}
-BuildRoot:     %{_tmppath}/%{name}-root
 
-BuildRequires:     systemd-rpm-macros
-Requires(post):    systemd
-Requires(preun):   systemd
-Requires(postun):  systemd
+BuildRequires: systemd-rpm-macros
+%{?systemd_requires}
 
 
 %description
@@ -32,8 +29,6 @@ cp -p %{SOURCE3} %{SOURCE4} .
 %build
 
 %install
-rm -rf %{buildroot}
-
 # install binary
 install -p -D -m 0755 \
    %{SOURCE0} \
@@ -48,9 +43,6 @@ install -p -D -m 0640 \
 install -p -D -m 0644 \
    %{SOURCE1} \
    %{buildroot}%{_unitdir}/%{name}.service
-
-%clean
-rm -rf %{buildroot}
 
 
 %pre
@@ -73,7 +65,6 @@ fi
 
 
 %files
-%defattr(-,root,root,-)
 %{_bindir}/%{name}
 %config(noreplace) %attr(640,root,%{uid}) %{_sysconfdir}/%{name}.conf
 %{_unitdir}/%{name}.service
