@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus"
@@ -135,8 +137,23 @@ type addrState struct {
 	blockedUntil time.Time
 }
 
-// maxNameLength caps the participant name passed to BBB.
+// maxNameLength caps the participant name passed to BBB, in characters
+// (runes), matching the maxlength attribute of the name input.
 const maxNameLength = 100
+
+// validName reports whether name is non-empty, valid UTF-8, at most
+// maxNameLength characters long and free of control characters.
+func validName(name string) bool {
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > maxNameLength {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 
 const (
 	rlResetAfter = 10 * time.Minute
@@ -415,7 +432,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if name == "" || len(name) > maxNameLength {
+	if !validName(name) {
 		renderError("name")
 		return
 	}
