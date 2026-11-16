@@ -1,0 +1,12 @@
+# Local configuration may contain secrets
+.env
+
+# Not needed to build the container image.
+# Go cannot stamp VCS info in the builder anyway since the image has no git.
+.git
+.github
+.rpm
+
+# Local build artifacts and editor files
+opencast-meet
+*.swp
