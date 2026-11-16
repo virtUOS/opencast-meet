@@ -11,6 +11,8 @@ License:       MIT
 Source0:       %{name}
 Source1:       %{name}.service
 Source2:       .env.example
+Source3:       LICENSE
+Source4:       README.md
 URL:           https://github.com/virtuos/%{name}
 BuildRoot:     %{_tmppath}/%{name}-root
 
@@ -25,6 +27,7 @@ A lightweight BigBlueButton web portal with Opencast integration.
 
 
 %prep
+cp -p %{SOURCE3} %{SOURCE4} .
 
 %build
 
