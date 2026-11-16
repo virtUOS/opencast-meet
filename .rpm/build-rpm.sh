@@ -10,8 +10,8 @@ cp "/rpmbuild/${1}" ~/rpmbuild/SOURCES/opencast-meet
 cp /rpmbuild/.env.example ~/rpmbuild/SOURCES/
 cp /rpmbuild/.rpm/opencast-meet.service ~/rpmbuild/SOURCES/
 cp /rpmbuild/.rpm/opencast-meet.spec ~/rpmbuild/SPECS/
-cp /rpmbuild/LICENSE ~/rpmbuild/BUILD/
-cp /rpmbuild/README.md ~/rpmbuild/BUILD/
+cp /rpmbuild/LICENSE ~/rpmbuild/SOURCES/
+cp /rpmbuild/README.md ~/rpmbuild/SOURCES/
 
 rpmbuild -ba --target "${3}" ~/rpmbuild/SPECS/opencast-meet.spec
 
