@@ -250,3 +250,28 @@ func TestStaticNoDirListing(t *testing.T) {
 		})
 	}
 }
+
+func TestValidName(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"", false},
+		{"Jane Smith", true},
+		{strings.Repeat("a", maxNameLength), true},
+		{strings.Repeat("a", maxNameLength+1), false},
+		{strings.Repeat("名", maxNameLength), true},
+		{strings.Repeat("名", maxNameLength+1), false},
+		{strings.Repeat("😀", maxNameLength), true},
+		{"Jane\x00Smith", false},
+		{"Jane\tSmith", false},
+		{"Jane\nSmith", false},
+		{"Jane\u0085Smith", false},
+		{"Jane\xffSmith", false},
+	}
+	for _, c := range cases {
+		if got := validName(c.name); got != c.want {
+			t.Errorf("validName(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
