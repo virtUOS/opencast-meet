@@ -42,6 +42,35 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
+func TestLimiterKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"203.0.113.5", "203.0.113.5"},
+		{"::ffff:203.0.113.5", "203.0.113.5"},
+		{"2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"},
+		{"2001:db8:1:3::1", "2001:db8:1:3::/64"},
+		{"garbage", "garbage"},
+	}
+	for _, c := range cases {
+		if got := limiterKey(c.in); got != c.want {
+			t.Errorf("limiterKey(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRateLimiterSharesIPv6Prefix(t *testing.T) {
+	rl := &rateLimiter{addrs: make(map[string]*addrState)}
+	rl.recordFailure(limiterKey("2001:db8:1:2::1"))
+	if d := rl.retryAfter(limiterKey("2001:db8:1:2:ffff:ffff:ffff:ffff")); d <= 0 {
+		t.Errorf("address in same /64 should be blocked, got %v", d)
+	}
+	if d := rl.retryAfter(limiterKey("2001:db8:1:3::1")); d != 0 {
+		t.Errorf("address in different /64 should not be blocked, got %v", d)
+	}
+	if n := rl.activeIPs(); n != 1 {
+		t.Errorf("want 1 limiter entry, got %d", n)
+	}
+}
+
 func TestRateLimiter(t *testing.T) {
 	rl := &rateLimiter{addrs: make(map[string]*addrState)}
 	if d := rl.retryAfter("a"); d != 0 {

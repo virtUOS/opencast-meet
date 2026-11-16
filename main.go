@@ -226,6 +226,21 @@ func (s *server) clientIP(r *http.Request) string {
 	return host
 }
 
+// limiterKey maps a client IP to its rate limiter key. IPv6 clients usually
+// control a whole /64, so the key is that prefix; otherwise rotating through
+// addresses would evade the limiter. IPv4 addresses (including IPv4-mapped
+// IPv6) are used in their plain form, unparsable values as is.
+func limiterKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ip
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return v4.String()
+	}
+	return (&net.IPNet{IP: parsed.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}).String()
+}
+
 // bbbURL builds a signed BigBlueButton API URL for the given call. The
 // checksum is SHA256(call + query + secret) as required by the BBB API.
 func bbbURL(cfg Config, call string, params url.Values) string {
@@ -376,7 +391,7 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	password := r.FormValue("password")
 	roomID := r.FormValue("room")
-	ip := s.clientIP(r)
+	ip := limiterKey(s.clientIP(r))
 
 	room := findRoom(s.config.Rooms, roomID)
 
