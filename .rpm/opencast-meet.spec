@@ -17,6 +17,7 @@ URL:           https://github.com/virtuos/%{name}
 
 BuildRequires: systemd-rpm-macros
 %{?systemd_requires}
+Requires(pre): shadow-utils
 
 
 %description
@@ -47,9 +48,9 @@ install -p -D -m 0644 \
 
 %pre
 # Create user and group if they don't exist
-if [ ! $(getent passwd %{uid}) ]; then
-   useradd --system --user-group %{uid} > /dev/null 2>&1 || :
-fi
+getent group %{uid} >/dev/null || groupadd --system %{uid}
+getent passwd %{uid} >/dev/null || \
+   useradd --system --gid %{uid} --home-dir / --shell /sbin/nologin %{uid}
 
 
 %post
