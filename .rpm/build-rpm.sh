@@ -2,7 +2,7 @@
 
 set -eux
 
-dnf install -y rpmdevtools systemd-rpm-macros
+dnf install -y rpmdevtools dnf-plugins-core
 rpmdev-setuptree
 
 echo "%appversion ${2}" >>~/.rpmmacros
@@ -12,6 +12,8 @@ cp /rpmbuild/.rpm/opencast-meet.service ~/rpmbuild/SOURCES/
 cp /rpmbuild/.rpm/opencast-meet.spec ~/rpmbuild/SPECS/
 cp /rpmbuild/LICENSE ~/rpmbuild/SOURCES/
 cp /rpmbuild/README.md ~/rpmbuild/SOURCES/
+
+dnf builddep -y ~/rpmbuild/SPECS/opencast-meet.spec
 
 rpmbuild -ba --target "${3}" ~/rpmbuild/SPECS/opencast-meet.spec
 
