@@ -100,11 +100,30 @@ func TestRateLimiter(t *testing.T) {
 		t.Errorf("reset should clear block, got %v", d)
 	}
 
+	// A stale entry not yet evicted must not carry its old failure count.
+	for i := 0; i < 5; i++ {
+		rl.recordFailure("old")
+	}
+	rl.addrs["old"].lastSeen = time.Now().Add(-rlResetAfter - time.Minute)
+	rl.recordFailure("old")
+	if f := rl.addrs["old"].failures; f != 1 {
+		t.Errorf("stale entry should restart counting, got %d failures", f)
+	}
+
+	// Requests no longer evict; only the cleanup does.
 	rl.recordFailure("stale")
 	rl.addrs["stale"].lastSeen = time.Now().Add(-rlResetAfter - time.Minute)
 	rl.recordFailure("fresh")
+	rl.retryAfter("fresh")
+	if _, ok := rl.addrs["stale"]; !ok {
+		t.Error("requests should not scan the table for stale entries")
+	}
+	rl.evictStale()
 	if _, ok := rl.addrs["stale"]; ok {
 		t.Error("stale entry should have been evicted")
+	}
+	if _, ok := rl.addrs["fresh"]; !ok {
+		t.Error("fresh entry should have been kept")
 	}
 }
 
