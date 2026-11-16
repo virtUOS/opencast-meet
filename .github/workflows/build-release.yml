@@ -54,6 +54,19 @@ jobs:
           "${{ github.ref_name }}"
           "${ARCH}"
 
+      - name: Build aarch64 RPM
+        env:
+          BINARY: "opencast-meet-${{ github.ref_name }}.linux-arm64"
+          ARCH: aarch64
+        run: >
+          docker run
+          -v .:/rpmbuild
+          quay.io/centos/centos:stream10
+          /rpmbuild/.rpm/build-rpm.sh
+          "${BINARY}"
+          "${{ github.ref_name }}"
+          "${ARCH}"
+
       - run: file opencast-meet*
 
       - name: Set up QEMU
