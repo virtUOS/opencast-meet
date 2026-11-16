@@ -200,3 +200,24 @@ func TestLoadRooms(t *testing.T) {
 		t.Error("no rooms should fail")
 	}
 }
+
+func TestStaticNoDirListing(t *testing.T) {
+	h := noDirListing(http.FileServer(http.FS(staticFiles)))
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/static/", http.StatusNotFound},
+		{"/static/css/", http.StatusNotFound},
+		{"/static/css/style.css", http.StatusOK},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, c.path, nil))
+			if w.Code != c.want {
+				t.Errorf("got %d, want %d", w.Code, c.want)
+			}
+		})
+	}
+}

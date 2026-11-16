@@ -447,6 +447,19 @@ func (s *server) handleJoin(w http.ResponseWriter, r *http.Request) {
 // securityHeaders sets conservative browser security headers on every
 // response. The page only loads same-origin resources; the data: image source
 // is for the inline SVG dropdown arrow in the stylesheet.
+// noDirListing wraps a file server so that directory paths return 404 instead
+// of a generated listing. Requests for a directory without a trailing slash are
+// redirected to the slash form by http.FileServer and then rejected here.
+func noDirListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -619,7 +632,7 @@ func main() {
 		metricsHandler = basicAuthHandler(cfg.MetricsUsername, cfg.MetricsPassword, metricsHandler)
 	}
 	http.Handle("/metrics", metricsHandler)
-	http.Handle("/static/", http.FileServer(http.FS(staticFiles)))
+	http.Handle("/static/", noDirListing(http.FileServer(http.FS(staticFiles))))
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
