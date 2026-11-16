@@ -131,6 +131,18 @@ type rateLimiter struct {
 	addrs map[string]*addrState
 }
 
+// newRateLimiter returns a rate limiter whose stale entries are evicted by a
+// background goroutine every rlCleanEvery, keeping the per-request work O(1).
+func newRateLimiter() *rateLimiter {
+	rl := &rateLimiter{addrs: make(map[string]*addrState)}
+	go func() {
+		for range time.Tick(rlCleanEvery) {
+			rl.evictStale()
+		}
+	}()
+	return rl
+}
+
 type addrState struct {
 	failures     int
 	lastSeen     time.Time
@@ -159,6 +171,7 @@ const (
 	rlResetAfter = 10 * time.Minute
 	rlDelayBase  = 2 * time.Second
 	rlDelayMax   = 30 * time.Second
+	rlCleanEvery = time.Minute
 )
 
 // retryAfter reports how long addr must wait before another attempt is allowed.
@@ -166,7 +179,6 @@ const (
 func (rl *rateLimiter) retryAfter(addr string) time.Duration {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	rl.evictStale()
 	s := rl.addrs[addr]
 	if s == nil {
 		return 0
@@ -182,14 +194,15 @@ func (rl *rateLimiter) retryAfter(addr string) time.Duration {
 func (rl *rateLimiter) recordFailure(addr string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	rl.evictStale()
+	now := time.Now()
 	s := rl.addrs[addr]
-	if s == nil {
+	if s == nil || s.lastSeen.Before(now.Add(-rlResetAfter)) {
+		// New or stale entry the background cleanup has not removed yet:
+		// start counting from scratch.
 		s = &addrState{}
 		rl.addrs[addr] = s
 	}
 	s.failures++
-	now := time.Now()
 	s.lastSeen = now
 	d := time.Duration(s.failures) * rlDelayBase
 	if d > rlDelayMax {
@@ -212,8 +225,9 @@ func (rl *rateLimiter) activeIPs() int {
 }
 
 // evictStale removes entries quiet for longer than rlResetAfter.
-// Must be called with rl.mu held.
 func (rl *rateLimiter) evictStale() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 	cutoff := time.Now().Add(-rlResetAfter)
 	for k, s := range rl.addrs {
 		if s.lastSeen.Before(cutoff) {
@@ -647,7 +661,7 @@ func main() {
 		config:     cfg,
 		tmpl:       tmpl,
 		httpClient: httpClient,
-		limiter:    &rateLimiter{addrs: make(map[string]*addrState)},
+		limiter:    newRateLimiter(),
 	}
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
